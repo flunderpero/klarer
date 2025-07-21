@@ -1,0 +1,77 @@
+-- Rules
+-- - All type identifiers must start with an uppercase letter
+-- - All other identifiers must start with a lowercase letter
+-- - Every type forms a namespace
+
+:: conforms to ToStr, ToDebug
+Token = 
+  | {:eof}
+  | {:eq} 
+  | {:error, message Str}
+  | {:int, value Int}
+  | {:lparen}
+  | {:minus}
+  | {:plus}
+  | {:rparen}
+  | {:semi}
+  | {:str, value Str}
+
+:: () -> Str
+:: part of ToStr
+Token:to_str = () =>
+    match self
+      | {:eof} => "EOF";
+      | {:eq} => "=";
+      | {:error, message} => message;
+      | {:int, value} => value.to_str;
+      | {:lparen} => "(";
+      | {:minus} => "-";
+      | {:plus} => "+";
+      | {:rparen} => ")";
+      | {:semi} => ";";
+      | {:str, value} => value;
+;
+
+-- Signature of List:from
+-- :: (f () -> {}) -> List{items {}}
+
+:: () -> List{items []Token}
+tokenize = (s) =>
+    mut tokens = List:new()
+    mut iter = s.iter
+    for c in iter
+        match c
+          | '=' => tokens.push {:eq};
+          | ';' => tokens.push {:semi};
+          | '(' => tokens.push {:lparen};
+          | ')' => tokens.push {:rparen};
+          | '-' => tokens.push {:minus};
+          | '+' => tokens.push {:plus};
+          | ' ' | '\t' | '\n' =>;
+          | '=' =>
+                -- Signature of List:peek
+                -- () -> {:some, {}} | {:none}
+                tokens.push match iter.peek 
+                    {:some, '>'} => 
+                        iter.next()
+                        tokens.push {:eq};
+                    _ => {:eq};
+          | '0'..'9' =>
+                value = iter.take_while => case $0 '0'..'9';
+                tokens.push {:int, Int.from_str value};
+          | 'a'..'z' =>
+                value = iter.take_while => case $0 'a'..'z' | 'A'..'Z' | '_' | '0'..'9';
+                tokens.push {:ident, value};
+          | '"' =>
+                value = iter.take_until => case $0 '"' | '\n';
+                match iter.peek
+                  | {:some, '"'} => 
+                        tokens.push {:str, value}
+                        iter.next();
+                  | _ => tokens.push {:error, "unterminated string literal"};
+                ;
+        ;
+    ;
+    tokens
+;
+

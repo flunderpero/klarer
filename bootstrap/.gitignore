@@ -1,0 +1,9 @@
+*.cmo
+*.cmi
+*.go
+test
+token_test
+ast_test
+typ_test
+code_test
+compiler_test

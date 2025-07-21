@@ -77,7 +77,16 @@ let test_call =
       assert_equal ~loc:__LOC__ "foo(a, b)" expr);
   test "call on any expression" (fun () ->
       let expr = gen_expr "(42 = foo)(a)" in
-      assert_equal ~loc:__LOC__ "(42 = foo)(a)" expr)
+      assert_equal ~loc:__LOC__ "(42 = foo)(a)" expr);
+  test "lparen must follow immediatly" (fun () ->
+      (* This is NOT a call, but an ident and paren expression. *)
+      let tokens = tokenize "a (b)" in
+      let expr = parse tokens in
+      assert_equal ~loc:__LOC__ "=> a\n(b);" (expr_to_string expr);
+      (* This IS a call, because the lparen follows without whitespace. *)
+      let tokens = tokenize "a(b)" in
+      let expr = parse tokens in
+      assert_equal ~loc:__LOC__ "=> a(b);" (expr_to_string expr))
 
 let test_program =
   test "simple program" (fun () ->

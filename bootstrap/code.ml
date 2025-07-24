@@ -58,7 +58,9 @@ let rec gencode_expr typ_map code parent_expr expr =
       Code.write code "}";
       Code.new_line code
   | CallExpr (_, target, args) ->
-      gencode_expr typ_map code expr target;
+      (match target with
+      | IdentExpr (_, "print") -> Code.write code "fmt.Print"
+      | _ -> gencode_expr typ_map code expr target);
       Code.write code "(";
       List.iter
         (fun e ->
@@ -83,6 +85,13 @@ let rec gencode_expr typ_map code parent_expr expr =
 let gencode typ_map expr =
   let code = Code.create () in
   Code.write code "package main\n\n";
+  Code.write code "import (";
+  Code.indent code;
+  Code.new_line code;
+  Code.write code "\"fmt\"";
+  Code.dedent code;
+  Code.new_line code;
+  Code.write code ")\n\n";
   Code.write code "func main() {\n";
   gencode_expr typ_map code (IdentExpr (0, "main")) expr;
   Code.write code "\n}\n";

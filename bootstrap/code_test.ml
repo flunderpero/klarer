@@ -88,6 +88,10 @@ let test_program =
       assert_equal ~loc:__LOC__
         {|package main
 
+import (
+    "fmt"
+)
+
 func main() {
 id := func(a any) any {
     b := 42 

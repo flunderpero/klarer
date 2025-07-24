@@ -1,0 +1,3 @@
+p = (s) => print(s) s;
+
+p("Hello, World!")

@@ -19,8 +19,12 @@ let compile filename src =
   let _, typ_map = typ_check expr in
   let code = gencode typ_map expr in
 
-  let file = open_out filename in
+  let base_filename = Filename.chop_extension filename in
+  let target_filename = base_filename ^ ".go" in
+  let file = open_out target_filename in
   output_string file code;
   close_out file;
 
-  run ("go build " ^ Filename.quote filename)
+  run
+    (Printf.sprintf "go build -o %s %s" (Filename.quote base_filename)
+       (Filename.quote target_filename))

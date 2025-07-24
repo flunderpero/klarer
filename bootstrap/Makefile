@@ -1,4 +1,4 @@
-.PHONY: clean test precommit
+.PHONY: clean test precommit examples
 
 ARGS = -I +unix unix.cma
 OCAMLC = ocamlc $(ARGS)
@@ -45,6 +45,16 @@ compiler.cmo: token.cmo ast.cmo typ.cmo code.cmo compiler.ml
 compiler_test: compiler.cmo
 	@echo "\n>>> Compiler tests"
 	$(OCAML) token.cmo ast.cmo typ.cmo code.cmo compiler.cmo compiler_test.ml
+
+klarerc: compiler.cmo
+	$(OCAMLC) -o klarerc token.cmo ast.cmo typ.cmo code.cmo compiler.cmo klarerc.ml
+
+examples: klarerc
+	@for f in examples/*.klr; do \
+		echo "$$f"; \
+		./klarerc $$f; \
+		./examples/$$(basename $$f .klr); \
+	done
 
 clean:
 	rm -f *.cmo *.cmi

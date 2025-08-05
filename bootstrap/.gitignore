@@ -1,5 +1,2 @@
-*.cmo
-*.cmi
-*.go
-test
-klarerc
+__pycache__
+.pytest_cache

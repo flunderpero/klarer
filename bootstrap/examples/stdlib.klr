@@ -1,0 +1,95 @@
+-- Klarer Standard Library: Iterable, Iterator, List, Set
+-- Demonstrating Shapes and Behaviours in Action
+
+-- Base Shapes
+Iterable = {item_at(i Int) {}, len() Int}
+Iterator = {next() {:none} | {:ok, value {}}}
+
+-- Behaviour Namespaces
+@Iterable.map = fun(iter, f) do
+    len = iter.len()
+    result = List.new()
+    i = 0
+    while i < len do
+        result.push(f(iter.item_at(i)))
+        i = i + 1
+    end
+    result
+end
+
+@Iterable.join_str = fun(iter, sep) do
+    len = iter.len()
+    result = ""
+    i = 0
+    while i < len do
+        if i > 0 do result = result + sepend
+        result = result + iter.item_at(i)
+        i = i + 1
+    end
+    result
+end
+
+@Iterator.collect = fun(it) do
+    result = List.new()
+    loop = true
+    while loop do
+        match it.next() do
+            case {:ok, value v} do result.push(v)
+            case {:none} do loop = false
+        end
+    end
+    result
+end
+
+-- List Shape and Behaviour
+List = {elements []{}, index Int} + @List + @Iterable
+
+@List.new = fun() do List{elements []{}, index 0} + @List
+
+@List.push = fun(mut list, e) do
+    list.elements[list.index] = e
+    list.index += 1
+end
+
+@List.item_at = fun(list, i) do list.elements[i]
+@List.len = fun(list) do list.index
+
+-- Set Shape and Behaviour built on List
+Set = {items List} + @Set + @Iterable
+
+@Set.new = fun() do Set{items List.new()} + @Set
+
+@Set.add = fun(set, key) do
+    if not @Set.contains(set, key) do set.items.push(key)end
+end
+
+@Set.contains = fun(mut set, key) do
+    mut i = 0
+    while i < set.items.len() do
+        break if set.items.item_at(i) == key do trueend
+        i = i + 1
+        false
+    end
+end
+
+@Set.item_at = (set, i) do set.items.item_at(i)
+@Set.len = (set) do set.items.len()
+
+-- Example Usage
+main = () do
+    mut list = List.new()
+    list.push("A")
+    list.push("B")
+    list.push("C")
+
+    uppercased = list.map((s) do to_upper(s))
+    print(uppercased.join_str(", "))
+
+    mut set = Set.new()
+    set.add("X")
+    set.add("Y")
+    set.add("X") -- duplicate, won't be added
+
+    print(set.join_str(" | "))
+end
+

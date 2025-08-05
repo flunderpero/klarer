@@ -1,0 +1,19 @@
+precommit: 
+    just format 
+    just lint --fix
+    just test
+
+format:
+    @echo "Formatting ..."
+    ruff format
+    # npx prettier -w *.md ../*.md
+
+lint *args:
+    @echo "Linting ..."
+    pyright
+    ruff check {{args}}
+
+test: test-pytest
+
+test-pytest *args:
+    pytest . {{args}}

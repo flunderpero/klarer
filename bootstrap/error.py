@@ -237,3 +237,8 @@ def traits_cannot_implement_traits(span: Span) -> Error:
 
 def return_outside_function(span: Span) -> Error:
     return SimpleError(span, "`return` outside of a function", _stack())
+
+
+def invalid_main(span: Span) -> Error:
+    # todo: How to specify the unit type?
+    return SimpleError(span, "`main` must conform to the signature `main() -> None`", _stack())

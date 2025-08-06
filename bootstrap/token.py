@@ -9,6 +9,7 @@ Value = str | None
 
 class Kind(Enum):
     behaviour_ns = "behaviour ns"
+    bind = "bind"
     braket_left = "["
     braket_right = "]"
     case = "case"
@@ -69,6 +70,7 @@ class Token:
 keywords = {
     x.value: x
     for x in (
+        Kind.bind,
         Kind.case,
         Kind.do,
         Kind.else_,

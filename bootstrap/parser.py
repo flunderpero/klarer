@@ -65,6 +65,12 @@ class Parser:
             return t
         return t.value_str()
 
+    def expect_behaviour_ns(self) -> str | None:
+        t = self.expect(token.Kind.behaviour_ns)
+        if t is None:
+            return t
+        return t.value_str()
+
     def expect(self, *kind: token.Kind) -> token.Token | None:
         t = self.input.next()
         if t.kind in kind:
@@ -102,43 +108,61 @@ class Parser:
         shape = self.parse_shape()
         if not shape:
             return None
-        return ast.ShapeDecl(self.id(), name, shape, self.input.span_merge(span))
+        behaviours: list[str] = []
+        if self.input.peek().kind == token.Kind.bind:
+            while True:
+                self.input.next()
+                behaviour = self.expect_behaviour_ns()
+                if not behaviour:
+                    return None
+                behaviours.append(behaviour)
+                if self.input.peek().kind != token.Kind.plus:
+                    break
+        return ast.ShapeDecl(self.id(), name, shape, behaviours, self.input.span_merge(span))
 
     def parse_shape(self) -> ast.Shape | None:
         span = self.input.span()
-        result: ast.Shape | None = None
-        while True:
-            t = self.input.peek()
-            shape: ast.Shape | None
-            match t.kind:
-                case token.Kind.curly_left:
-                    shape = self.parse_product_shape()
-                case token.Kind.fun:
-                    shape = self.parse_fun_shape()
-                case token.Kind.type_ident:
-                    match t.value_str():
-                        case "Int" | "Bool" | "Str" | "Char":
-                            self.input.next()
-                            shape = ast.NominalType(self.id(), t.value_str(), self.input.span_merge(span))
-                        case _:
-                            return None
-                case _:
-                    self.error(error.unexpected_token(t.span, t.kind.value))
-                    return None
+        result = self.parse_primary_shape()
+        if not result:
+            return None
+        while self.input.peek().kind == token.Kind.pipe:
+            self.input.next()
+            shape = self.parse_primary_shape()
             if not shape:
                 return None
-            if result is None:
-                result = shape
+            if not isinstance(result, ast.SumShape):
+                result = ast.SumShape(self.id(), [result, shape], self.input.span_merge(span))
             else:
                 result.variants.append(shape)
-            if self.input.peek().kind == token.Kind.pipe:
-                self.input.next()
-                if not isinstance(result, ast.SumShape):
-                    result = ast.SumShape(self.id(), [result], self.input.span_merge(span))
-            else:
-                break
-
         return result
+
+    def parse_primary_shape(self) -> ast.Shape | None:
+        t = self.input.peek()
+        shape: ast.Shape | None
+        match t.kind:
+            case token.Kind.curly_left:
+                shape = self.parse_product_shape()
+            case token.Kind.fun:
+                shape = self.parse_fun_shape()
+            case token.Kind.type_ident:
+                self.input.next()
+                shape = ast.ShapeRef(self.id(), t.value_str(), self.input.span_merge(t.span))
+            case _:
+                self.error(
+                    error.unexpected_token(
+                        t.span, t.kind.name, t.kind.curly_left.name, t.kind.fun.name, t.kind.type_ident.name
+                    )
+                )
+                return None
+        if not shape:
+            return None
+        if self.input.peek().kind == token.Kind.plus:
+            self.input.next()
+            rhs = self.parse_primary_shape()
+            if not rhs:
+                return None
+            shape = ast.ProductShapeComp(self.id(), shape, rhs, self.input.span_merge(t.span))
+        return shape
 
     def parse_fun_shape(self) -> ast.FunShape | None:
         span = self.input.span()
@@ -191,8 +215,21 @@ class Parser:
             return None
         return ast.ProductShape(self.id(), attrs, self.input.span_merge(span))
 
-    def parse_fun_def(self, name: str) -> ast.FunDef | None:
+    def parse_behaviour_fun_def(self) -> ast.FunDef | None:
         span = self.input.span()
+        namespace = self.expect_behaviour_ns()
+        if not namespace:
+            return None
+        if not self.expect(token.Kind.dot):
+            return None
+        name = self.expect_ident()
+        if not name:
+            return None
+        if not self.expect(token.Kind.eq):
+            return None
+        return self.parse_fun_def(name, span, namespace)
+
+    def parse_fun_def(self, name: str, span: Span, namespace: str | None = None) -> ast.FunDef | None:
         if not self.expect(token.Kind.fun):
             return None
         params: list[str] = []
@@ -216,7 +253,7 @@ class Parser:
         body = self.parse_block()
         if not body:
             return None
-        return ast.FunDef(self.id(), name, None, params, body, self.input.span_merge(span))
+        return ast.FunDef(self.id(), name, namespace, params, body, self.input.span_merge(span))
 
     def parse_if(self) -> ast.If | None:
         span = self.input.span()
@@ -277,6 +314,28 @@ class Parser:
                 return None
             lhs = ast.BinaryExpr(self.id(), op, lhs, rhs, self.input.span_merge(lhs.span))
 
+    def parse_call(self, callee: ast.Expr) -> ast.Expr | None:
+        span = self.input.span()
+        if not self.expect(token.Kind.paren_left):
+            return None
+        args: list[ast.Expr] = []
+        while self.input.peek().kind != token.Kind.paren_right:
+            arg = self.parse_expr()
+            if not arg:
+                return None
+            args.append(arg)
+            match self.input.peek().kind:
+                case token.Kind.comma:
+                    self.input.next()
+                case token.Kind.paren_right:
+                    break
+                case _:
+                    self.error(error.unexpected_token(self.input.span(), self.input.peek().kind.value))
+                    return None
+        if not self.expect(token.Kind.paren_right):
+            return None
+        return ast.Call(self.id(), callee, args, self.input.span_merge(span))
+
     def parse_primary_expr(self) -> ast.Expr | None:
         t = self.input.peek()
         expr: ast.Expr | None
@@ -310,15 +369,14 @@ class Parser:
                 return None
         if not expr:
             return None
-
-        # while expr is not None:
-        #     match self.input.peek().kind:
-        #         case token.Kind.paren_left:
-        #             expr = self.parse_call(expr)
-        #         case token.Kind.dot:
-        #             expr = self.parse_member(expr)
-        #         case _:
-        #             break
+        while expr is not None:
+            match self.input.peek().kind:
+                case token.Kind.paren_left:
+                    expr = self.parse_call(expr)
+                # case token.Kind.dot:
+                #     expr = self.parse_member(expr)
+                case _:
+                    break
         return expr
 
     def parse_block(self) -> ast.Block | None:
@@ -341,6 +399,8 @@ class Parser:
                 return self.parse_loop()
             case token.Kind.type_ident:
                 return self.parse_shape_decl()
+            case token.Kind.behaviour_ns:
+                return self.parse_behaviour_fun_def()
             case token.Kind.mut:
                 self.input.next()
                 assign = self.parse_expr()
@@ -362,7 +422,7 @@ class Parser:
                         if not isinstance(expr, ast.Name) or expr.kind != "ident":
                             self.error(error.expected_ident(str(expr), t.span))
                             return None
-                        return self.parse_fun_def(expr.name)
+                        return self.parse_fun_def(expr.name, t.span)
                     rhs = self.parse_expr()
                     if not rhs:
                         return None

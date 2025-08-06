@@ -25,7 +25,7 @@ def to_str_withoud_nid(node: Node) -> str:
 def nid(id: NodeId) -> str:
     if not nid_enabled:
         return ""
-    return f"{{{id}}}"
+    return f"{id}:"
 
 
 @dataclass
@@ -57,6 +57,8 @@ class IntLit:
     span: Span
 
     def __str__(self) -> str:
+        if self.signed and self.bits == 64:
+            return nid(self.id) + "Int"
         return nid(self.id) + f"I{self.bits}" if self.signed else f"U{self.bits}"
 
 
@@ -99,14 +101,16 @@ class ShapeDecl:
     id: NodeId
     name: str
     shape: Shape
+    behaviours: list[str]
     span: Span
 
     def __str__(self) -> str:
-        return nid(self.id) + f"shape {self.name} = {self.shape}"
+        behaviours = " with " + " + ".join(f"@{x}" for x in self.behaviours) if self.behaviours else ""
+        return nid(self.id) + f"{self.name} = {self.shape}{behaviours}"
 
 
 @dataclass
-class NamedShape:
+class ShapeRef:
     id: NodeId
     name: str
     span: Span
@@ -139,6 +143,17 @@ class ProductShape:
 
 
 @dataclass
+class ProductShapeComp:
+    id: NodeId
+    lhs: Shape
+    rhs: Shape
+    span: Span
+
+    def __str__(self) -> str:
+        return nid(self.id) + f"{self.lhs} + {self.rhs}"
+
+
+@dataclass
 class SumShape:
     id: NodeId
     variants: list[Shape]
@@ -146,16 +161,6 @@ class SumShape:
 
     def __str__(self) -> str:
         return nid(self.id) + " | ".join(str(x) for x in self.variants)
-
-
-@dataclass
-class NominalType:
-    id: NodeId
-    name: str
-    span: Span
-
-    def __str__(self) -> str:
-        return nid(self.id) + self.name
 
 
 @dataclass
@@ -272,7 +277,7 @@ class Module:
         return nid(self.id) + f"mod {self.fqn}\n" + "\n".join(str(x) for x in self.nodes)
 
 
-Shape = NamedShape | FunShape | NominalType | ProductShape | SumShape
+Shape = ShapeRef | FunShape | ProductShape | ProductShapeComp | SumShape
 Expr = BinaryExpr | Block | BoolLit | Call | CharLit | If | IntLit | Member | Name | StrLit
 Node = Assign | Expr | FunDef | Module | Loop | Shape | Attr | ShapeDecl
 
@@ -325,6 +330,9 @@ def walk(node: Node, visit_: ASTVisitor) -> bool:
         case ProductShape():
             for i, attr in enumerate(node.attrs):
                 node.attrs[i] = cast(Attr, visit(attr, node))
+        case ProductShapeComp():
+            node.lhs = cast(Shape, visit(node.lhs, node))
+            node.rhs = cast(Shape, visit(node.rhs, node))
         case SumShape():
             for i, variant in enumerate(node.variants):
                 node.variants[i] = cast(Shape, visit(variant, node))
@@ -332,7 +340,7 @@ def walk(node: Node, visit_: ASTVisitor) -> bool:
             for i, param in enumerate(node.params):
                 node.params[i] = cast(Attr, visit(param, node))
             node.result = cast(Shape, visit(node.result, node))
-        case Name() | IntLit() | CharLit() | StrLit() | BoolLit() | NominalType():
+        case Name() | IntLit() | CharLit() | StrLit() | BoolLit() | ShapeRef():
             return False
         case _:
             raise AssertionError(f"Don't know how to walk: {node}")

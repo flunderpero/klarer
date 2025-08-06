@@ -3,9 +3,9 @@ from __future__ import annotations
 from . import ast
 from .conftest import node, parse_first
 
-int_type = node(ast.NominalType, name="Int")
-str_type = node(ast.NominalType, name="Str")
-bool_type = node(ast.NominalType, name="Bool")
+int_type = node(ast.ShapeRef, name="Int")
+str_type = node(ast.ShapeRef, name="Str")
+bool_type = node(ast.ShapeRef, name="Bool")
 
 
 def test_literals() -> None:
@@ -30,6 +30,12 @@ def test_fun_def() -> None:
     )
 
 
+def test_fun_def_with_behaviour_ns() -> None:
+    assert parse_first("@Foo.bar = fun(a, b) do end") == node(
+        ast.FunDef, name="bar", namespace="Foo", params=["a", "b"], body=node(ast.Block, nodes=[])
+    )
+
+
 def test_fun_shapes() -> None:
     assert parse_shape_decl("Foo = fun(a Int, b Str) Bool", "Foo") == node(
         ast.FunShape,
@@ -39,6 +45,10 @@ def test_fun_shapes() -> None:
         ],
         result=bool_type,
     )
+
+
+def test_shape_refs() -> None:
+    assert parse_shape_decl("Foo = Bar", "Foo") == node(ast.ShapeRef, name="Bar")
 
 
 def test_product_shapes() -> None:
@@ -78,6 +88,42 @@ def test_complex_shapes() -> None:
                 ],
             ),
         ],
+    )
+
+
+def test_product_shape_composition() -> None:
+    assert parse_shape_decl("Foo = {a Int} + Bar", "Foo") == node(
+        ast.ProductShapeComp,
+        lhs=node(ast.ProductShape, attrs=[node(ast.Attr, name="a", shape=int_type)]),
+        rhs=node(ast.ShapeRef, name="Bar"),
+    )
+
+
+def test_product_shape_composition_preceeds_sum_shape() -> None:
+    assert parse_shape_decl("Foo = {a Int} + Bar | Baz", "Foo") == node(
+        ast.SumShape,
+        variants=[
+            node(
+                ast.ProductShapeComp,
+                lhs=node(ast.ProductShape, attrs=[node(ast.Attr, name="a", shape=int_type)]),
+                rhs=node(ast.ShapeRef, name="Bar"),
+            ),
+            node(ast.ShapeRef, name="Baz"),
+        ],
+    )
+
+
+def test_shape_behaviour() -> None:
+    decl = parse_first("Foo = Bar | Baz bind @Foo + @Baz")
+    assert isinstance(decl, ast.ShapeDecl)
+    assert decl.behaviours == ["Foo", "Baz"]
+    assert decl.shape == node(ast.SumShape, variants=[node(ast.ShapeRef, name="Bar"), node(ast.ShapeRef, name="Baz")])
+
+
+def test_call() -> None:
+    assert parse_first("foo()") == node(ast.Call, callee=node(ast.Name, name="foo"), args=[])
+    assert parse_first("foo(42)") == node(
+        ast.Call, callee=node(ast.Name, name="foo"), args=[node(ast.IntLit, value=42)]
     )
 
 

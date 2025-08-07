@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import inspect
 from dataclasses import dataclass
-from typing import Callable, Literal
+from typing import Any, Callable, Literal
 
 from . import ast, error, token
-from .span import FQN, Span
+from .span import FQN, Span, log
 
 
 @dataclass
@@ -26,6 +27,17 @@ class Input:
             self.index += 1
         return self.tokens[self.index]
 
+    def peek1(self) -> token.Token:
+        """Return the token after the next token without consuming it. Skips comments.
+        Having the function does not mean we cannot parse our grammar in LL(1) fashion.
+        We have this function to make parsing more convenient.
+        """
+        self.peek()
+        i = self.index + 1
+        while self.tokens[i].kind == token.Kind.comment:
+            i += 1
+        return self.tokens[i]
+
     def span(self) -> Span:
         return self.peek().span
 
@@ -38,10 +50,26 @@ class Input:
 class Parser:
     input: Input
     errors: list[error.Error]
+    nesting_level = 0
 
     def __init__(self, input: Input) -> None:
         self.input = input
         self.errors = []
+        for name, fun in (x for x in inspect.getmembers(self, inspect.ismethod) if x[0].startswith("parse_")):
+
+            def make_wrapper(fun: Callable) -> Any:
+                def wrapper(*args: Any, **kwargs: Any) -> Any:
+                    fun_desc = f"{fun.__name__}({', '.join(str(x) for x in args)})"
+                    log("parser-trace", f">>> {fun_desc}", self.nesting_level)
+                    self.nesting_level += 1
+                    res = fun(*args, **kwargs)
+                    self.nesting_level -= 1
+                    log("parser-trace", f"<<< {fun_desc} = {res}", self.nesting_level)
+                    return res
+
+                return wrapper
+
+            setattr(self, name, make_wrapper(fun))
 
     def error(self, err: error.Error) -> None:
         """Record the error and find the next best place to resume parsing."""
@@ -314,6 +342,79 @@ class Parser:
                 return None
             lhs = ast.BinaryExpr(self.id(), op, lhs, rhs, self.input.span_merge(lhs.span))
 
+    def parse_primary_expr(self) -> ast.Expr | None:
+        t = self.input.peek()
+        expr: ast.Expr | None
+        match t.kind:
+            case token.Kind.do:
+                return self.parse_block()
+            case token.Kind.ident:
+                expr = self.parse_name(t.kind)
+            case token.Kind.str_lit:
+                self.input.next()
+                return ast.StrLit(self.id(), t.value_str(), t.span)
+            case token.Kind.char_lit:
+                self.input.next()
+                return ast.CharLit(self.id(), t.value_str(), t.span)
+            case token.Kind.int_lit:
+                self.input.next()
+                return ast.IntLit(
+                    self.id(),
+                    bits=64,
+                    signed=True,
+                    value=int(t.value_str()),
+                    span=t.span,
+                )
+            case token.Kind.true | token.Kind.false:
+                self.input.next()
+                return ast.BoolLit(self.id(), value=t.kind == token.Kind.true, span=t.span)
+            case token.Kind.if_:
+                return self.parse_if()
+            case token.Kind.type_ident | token.Kind.curly_left:
+                return self.parse_shape_literal()
+            case _:
+                self.error(error.unexpected_token(t.span, t.kind.value))
+                return None
+        if not expr:
+            return None
+        while expr is not None:
+            match self.input.peek().kind:
+                case token.Kind.paren_left:
+                    expr = self.parse_call(expr)
+                # case token.Kind.dot:
+                #     expr = self.parse_member(expr)
+                case _:
+                    break
+        return expr
+
+    def parse_shape_literal(self) -> ast.ShapeLit | None:
+        span = self.input.span()
+        t = self.expect(token.Kind.curly_left, token.Kind.type_ident)
+        if not t:
+            return None
+        shape_ref: ast.ShapeRef | None = None
+        if t.kind == token.Kind.type_ident:
+            shape_ref = ast.ShapeRef(self.id(), t.value_str(), t.span)
+            if not self.expect(token.Kind.curly_left):
+                return None
+        attrs: list[ast.ShapeLitAttr] = []
+        while self.input.peek().kind != token.Kind.curly_right:
+            param_span = self.input.span()
+            param_name = self.expect_ident()
+            if not param_name:
+                return None
+            if not self.expect(token.Kind.eq):
+                return None
+            param_value = self.parse_expr()
+            if not param_value:
+                return None
+            attrs.append(ast.ShapeLitAttr(self.id(), param_name, param_value, self.input.span_merge(param_span)))
+            if self.input.peek().kind == token.Kind.comma:
+                self.input.next()
+        if not self.expect(token.Kind.curly_right):
+            return None
+        return ast.ShapeLit(self.id(), shape_ref, attrs, self.input.span_merge(span))
+
     def parse_call(self, callee: ast.Expr) -> ast.Expr | None:
         span = self.input.span()
         if not self.expect(token.Kind.paren_left):
@@ -336,49 +437,6 @@ class Parser:
             return None
         return ast.Call(self.id(), callee, args, self.input.span_merge(span))
 
-    def parse_primary_expr(self) -> ast.Expr | None:
-        t = self.input.peek()
-        expr: ast.Expr | None
-        match t.kind:
-            case token.Kind.do:
-                return self.parse_block()
-            case token.Kind.ident | token.Kind.type_ident | token.Kind.behaviour_ns:
-                expr = self.parse_name(t.kind)
-            case token.Kind.str_lit:
-                self.input.next()
-                return ast.StrLit(self.id(), t.value_str(), t.span)
-            case token.Kind.char_lit:
-                self.input.next()
-                return ast.CharLit(self.id(), t.value_str(), t.span)
-            case token.Kind.int_lit:
-                self.input.next()
-                return ast.IntLit(
-                    self.id(),
-                    bits=64,
-                    signed=True,
-                    value=int(t.value_str()),
-                    span=t.span,
-                )
-            case token.Kind.true | token.Kind.false:
-                self.input.next()
-                return ast.BoolLit(self.id(), value=t.kind == token.Kind.true, span=t.span)
-            case token.Kind.if_:
-                return self.parse_if()
-            case _:
-                self.error(error.unexpected_token(t.span, t.kind.value))
-                return None
-        if not expr:
-            return None
-        while expr is not None:
-            match self.input.peek().kind:
-                case token.Kind.paren_left:
-                    expr = self.parse_call(expr)
-                # case token.Kind.dot:
-                #     expr = self.parse_member(expr)
-                case _:
-                    break
-        return expr
-
     def parse_block(self) -> ast.Block | None:
         span = self.input.span()
         self.expect(token.Kind.do)
@@ -398,7 +456,11 @@ class Parser:
             case token.Kind.loop:
                 return self.parse_loop()
             case token.Kind.type_ident:
-                return self.parse_shape_decl()
+                match self.input.peek1().kind:
+                    case token.Kind.curly_left:
+                        return self.parse_shape_literal()
+                    case _:
+                        return self.parse_shape_decl()
             case token.Kind.behaviour_ns:
                 return self.parse_behaviour_fun_def()
             case token.Kind.mut:

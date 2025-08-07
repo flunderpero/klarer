@@ -42,7 +42,7 @@ def typ(typ: ir.Typ) -> str:
         case ir.Str():
             return "string"
         case ir.Struct():
-            return "struct"
+            return typ.fqn
         case ir.NoneTyp():
             return "_"
         case _:
@@ -51,6 +51,16 @@ def typ(typ: ir.Typ) -> str:
 
 def gen_inst(inst: ir.Inst, code: Code) -> None:
     match inst:
+        case ir.Alloc():
+            assert isinstance(inst.reg.typ, ir.Struct)
+            struct_name = inst.reg.typ.fqn
+            code.write(f"{inst.reg.id} := {struct_name}{{")
+            for i, reg in enumerate(inst.args):
+                if i > 0:
+                    code.write(", ")
+                code.write(f"_{i}: {reg}")
+            code.write("}")
+            code.newline()
         case ir.Call():
             callee = inst.callee
             if isinstance(callee, str) and callee in map_builtins:
@@ -60,8 +70,11 @@ def gen_inst(inst: ir.Inst, code: Code) -> None:
             code.write(f"{callee}(")
             code.write(", ".join(f"{arg}" for arg in inst.args) + ")")
             code.newline()
+        case ir.IntConst():
+            code.write(f"{inst.reg} := {inst.value}")
+            code.newline()
         case _:
-            raise NotImplementedError(f"TODO: {inst}")
+            raise NotImplementedError(f"TODO: {type(inst).__name__} {inst}")
 
 
 def gen_fun(fun_ir: ir.FunIR) -> str:
@@ -94,6 +107,16 @@ def gogen(ir_: ir.IR) -> str:
         code.write(f"var {const.reg} = {json.dumps(const.value)}")
         code.newline()
     if ir_.constant_pool:
+        code.newline()
+    for struct in ir_.structs.values():
+        code.write(f"type {struct.fqn} struct{{")
+        for i, field in enumerate(struct.fields):
+            if i > 0:
+                code.write("; ")
+            code.write(f"_{i} {typ(field)}")
+        code.write("}")
+        code.newline()
+    if ir_.structs:
         code.newline()
     for fun_ir in ir_.fn_irs:
         code.write(gen_fun(fun_ir))

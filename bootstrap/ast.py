@@ -97,6 +97,29 @@ class Member:
 
 
 @dataclass
+class ShapeLitAttr:
+    id: NodeId
+    name: str
+    value: Expr
+    span: Span
+
+    def __str__(self) -> str:
+        return nid(self.id) + f"{self.name} = {self.value}"
+
+
+@dataclass
+class ShapeLit:
+    id: NodeId
+    shape_ref: ShapeRef | None
+    attrs: list[ShapeLitAttr]
+    span: Span
+
+    def __str__(self) -> str:
+        shape_ref = f"{self.shape_ref}." if self.shape_ref else ""
+        return nid(self.id) + f"{shape_ref}{{{', '.join(str(x) for x in self.attrs)}}}"
+
+
+@dataclass
 class ShapeDecl:
     id: NodeId
     name: str
@@ -278,8 +301,8 @@ class Module:
 
 
 Shape = ShapeRef | FunShape | ProductShape | ProductShapeComp | SumShape
-Expr = BinaryExpr | Block | BoolLit | Call | CharLit | If | IntLit | Member | Name | StrLit
-Node = Assign | Expr | FunDef | Module | Loop | Shape | Attr | ShapeDecl
+Expr = BinaryExpr | Block | BoolLit | Call | CharLit | If | IntLit | Member | Name | StrLit | ShapeLit
+Node = Assign | Expr | FunDef | Module | Loop | Shape | Attr | ShapeDecl | ShapeLitAttr
 
 ASTVisitor = Callable[[Node, Node | None], Node]
 
@@ -325,6 +348,13 @@ def walk(node: Node, visit_: ASTVisitor) -> bool:
             node.target = cast(Expr, visit(node.target, node))
         case ShapeDecl():
             node.shape = cast(Shape, visit(node.shape, node))
+        case ShapeLit():
+            if node.shape_ref:
+                node.shape_ref = cast(ShapeRef, visit(node.shape_ref, node))
+            for i, attr in enumerate(node.attrs):
+                node.attrs[i] = cast(ShapeLitAttr, visit(attr, node))
+        case ShapeLitAttr():
+            node.value = cast(Expr, visit(node.value, node))
         case Attr():
             node.shape = cast(Shape, visit(node.shape, node))
         case ProductShape():

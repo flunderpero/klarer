@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from . import ast, types
-from .conftest import typecheck
+from .conftest import typ, typecheck
 
 
 def test_literals() -> None:
@@ -69,6 +69,47 @@ def test_call_specialization() -> None:
         f(true)
         f("hello")
     """)
+    assert tc.type_at(2, 1, ast.Name) == typ(
+        types.Fun, name="f", params=[types.Attr("a", types.IntTyp)], result=types.IntTyp
+    )
     assert tc.type_at(2, 1, ast.Call) == types.IntTyp
+
+    assert tc.type_at(3, 1, ast.Name) == typ(
+        types.Fun, name="f", params=[types.Attr("a", types.BoolTyp)], result=types.BoolTyp
+    )
     assert tc.type_at(3, 1, ast.Call) == types.BoolTyp
+
+    assert tc.type_at(4, 1, ast.Name) == typ(
+        types.Fun, name="f", params=[types.Attr("a", types.StrTyp)], result=types.StrTyp
+    )
     assert tc.type_at(4, 1, ast.Call) == types.StrTyp
+
+
+def test_simple_product_shape() -> None:
+    tc = typecheck("""
+        Person = {name Str, age Int}
+    """)
+    assert tc.type_at(1, 1, ast.ProductShape) == typ(
+        types.Shape,
+        attrs=[types.Attr("name", types.StrTyp), types.Attr("age", types.IntTyp)],
+    )
+
+
+def test_shape_literal() -> None:
+    tc = typecheck("""
+        Person = {name Str, age Int}
+
+        main = fun() do
+            p = Person{name = "John", age = 42}
+        end
+    """)
+    assert tc.type_at(1, 1, ast.ProductShape) == typ(
+        types.Shape,
+        attrs=[types.Attr("name", types.StrTyp), types.Attr("age", types.IntTyp)],
+    )
+    assert str(tc.type_at(4, 1, ast.ShapeLit)) == str(
+        typ(
+            types.Shape,
+            attrs=[types.Attr("name", types.StrTyp), types.Attr("age", types.IntTyp)],
+        )
+    )

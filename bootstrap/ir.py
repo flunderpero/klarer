@@ -642,6 +642,16 @@ class FunGen:
             case ast.BoolLit():
                 reg = self.reg(I1)
                 self.emit(IntConst(reg, value=int(node.value)), node)
+            case ast.ShapeLit():
+                ast.walk(node, self.generate)
+                regs = [self.node_regs[x.id] for x in node.attrs]
+                typ = self.typ(self.type_env.get(node))
+                reg = self.reg(typ)
+                self.emit(Alloc(reg, regs), node)
+            case ast.ShapeLitAttr():
+                ast.walk(node, self.generate)
+                reg = self.node_regs[node.value.id]
+                self.node_regs[node.id] = reg
             case ast.Name():
                 reg = self.scope.find(node.name)
                 if reg:
@@ -687,7 +697,10 @@ class FunGen:
                 src = node.target
                 match src:
                     case ast.Name():
-                        self.scope.update(src.name, self.node_regs[node.value.id])
+                        if not self.scope.find(src.name):
+                            self.scope.declare(src.name, self.node_regs[node.value.id])
+                        else:
+                            self.scope.update(src.name, self.node_regs[node.value.id])
                     case _:
                         raise AssertionError(f"Unsupported target type: {src}")
                 self.node_regs[node.id] = NoneReg

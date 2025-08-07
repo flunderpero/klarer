@@ -93,9 +93,21 @@ def node(kind: Callable, **kwargs: Any) -> ast.Node:
             defaults.update({"namespace": None})
         case ast.Name:
             defaults.update({"kind": "ident"})
+        case ast.ShapeLit:
+            defaults.update({"shape_ref": None})
         case ast.ShapeDecl:
             defaults.update({"behaviours": []})
     return kind(**defaults | kwargs)
+
+
+def typ(kind: Callable, **kwargs: Any) -> types.Typ:
+    defaults: Any = {"span": Span("test.kl", "", 0, 0)}
+    match kind:
+        case types.Shape:
+            defaults.update({"name": None, "attrs": [], "variants": [], "behaviours": []})
+        case types.Fun:
+            defaults.update({"name": None, "builtin": False})
+    return types.Typ(kind(**defaults | kwargs))
 
 
 def typecheck(code: str) -> TypeChecker:

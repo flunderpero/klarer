@@ -60,3 +60,23 @@ def test_call_multiple() -> None:
             call none print, Str _1
             ret none _none
     """)
+
+
+def test_simple_product_shape_literal() -> None:
+    result = generate_ir("""
+        main = fun() do
+            p = {name = "John", age = 42}
+        end
+    """)
+    assert str(result) == strip("""
+        s0 = "John"
+
+        name_Str_age_Int{Str, I64}
+
+        declare main() none:
+        block_1:
+            _1 = 42
+            _2 = alloc name_Str_age_Int{Str, I64}, Str s0, I64 _1
+            ret none _none
+
+    """)

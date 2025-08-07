@@ -3,15 +3,16 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
-LogTopic = Literal["typechecker-trace", "typechecker-mono"]
+LogTopic = Literal["parser-trace", "typechecker-trace", "typechecker-mono"]
 
 log_topics: set[LogTopic] = set()
 
 
 # todo: move somewhere else or rename span.py
-def log(topic: LogTopic, msg: str) -> None:
+def log(topic: LogTopic, msg: str, indent: int = 0) -> None:
     if topic in log_topics:
-        print(f"\x1b[1;90m[{topic}]\x1b[0m {msg}")
+        msg = msg.replace("\n", "\\n")
+        print(f"\x1b[1;90m[{topic}]\x1b[0m {indent * '  '}{msg}")
 
 
 @dataclass

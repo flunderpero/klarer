@@ -120,6 +120,51 @@ def test_shape_behaviour() -> None:
     assert decl.shape == node(ast.SumShape, variants=[node(ast.ShapeRef, name="Bar"), node(ast.ShapeRef, name="Baz")])
 
 
+def test_shape_literal() -> None:
+    assert parse_first("{a = 42}") == node(
+        ast.ShapeLit, attrs=[node(ast.ShapeLitAttr, name="a", value=node(ast.IntLit, value=42))]
+    )
+    assert parse_first("Foo{a = 42}") == node(
+        ast.ShapeLit,
+        shape_ref=node(ast.ShapeRef, name="Foo"),
+        attrs=[node(ast.ShapeLitAttr, name="a", value=node(ast.IntLit, value=42))],
+    )
+
+
+def test_nested_shape_literal() -> None:
+    assert parse_first("{a = {b = 42}}") == node(
+        ast.ShapeLit,
+        attrs=[
+            node(
+                ast.ShapeLitAttr,
+                name="a",
+                value=node(
+                    ast.ShapeLit,
+                    attrs=[node(ast.ShapeLitAttr, name="b", value=node(ast.IntLit, value=42))],
+                ),
+            )
+        ],
+    )
+
+
+def test_nested_shape_literal_with_shape_ref() -> None:
+    assert parse_first("Foo{a = Bar{b = 42}}") == node(
+        ast.ShapeLit,
+        shape_ref=node(ast.ShapeRef, name="Foo"),
+        attrs=[
+            node(
+                ast.ShapeLitAttr,
+                name="a",
+                value=node(
+                    ast.ShapeLit,
+                    shape_ref=node(ast.ShapeRef, name="Bar"),
+                    attrs=[node(ast.ShapeLitAttr, name="b", value=node(ast.IntLit, value=42))],
+                ),
+            )
+        ],
+    )
+
+
 def test_call() -> None:
     assert parse_first("foo()") == node(ast.Call, callee=node(ast.Name, name="foo"), args=[])
     assert parse_first("foo(42)") == node(

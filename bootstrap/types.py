@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import inspect
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Callable, Literal
 
 from . import ast, error
 from .span import Span, log
@@ -69,7 +70,7 @@ class Attr:
 
 @dataclass
 class Shape:
-    name: str
+    name: str | None
     attrs: list[Attr]
     variants: list[Typ]
     behaviours: list[Behaviour]
@@ -81,7 +82,8 @@ class Shape:
     def __str__(self) -> str:
         variants = " | " + " | ".join(str(x) for x in self.variants) if self.variants else ""
         behaviours = " bind " + " + ".join(str(x) for x in self.behaviours) if self.behaviours else ""
-        return f"{{{self.attrs}}}{variants}{behaviours}"
+        name = f" {self.name}" if self.name else ""
+        return f"{name}{{{self.attrs}}}{variants}{behaviours}"
 
     def __eq__(self, other: object) -> bool:
         return (
@@ -243,6 +245,10 @@ class Scope:
             mut=False,
             builtin=True,
         )
+        scope.bindings["Int"] = Binding(IntTyp, mut=False, builtin=True)
+        scope.bindings["Str"] = Binding(StrTyp, mut=False, builtin=True)
+        scope.bindings["Bool"] = Binding(BoolTyp, mut=False, builtin=True)
+        scope.bindings["Char"] = Binding(CharTyp, mut=False, builtin=True)
         return scope
 
     def lookup(self, name: str) -> Binding | None:
@@ -279,6 +285,7 @@ class TypeCheck:
     scope: Scope
     fun_specs: dict[Fun, list[FunSpec]]
     fun_defs: dict[Fun, ast.FunDef]
+    nesting_level = 0
 
     def __init__(self) -> None:
         self.type_env = TypeEnv(None, {})
@@ -286,6 +293,21 @@ class TypeCheck:
         self.scope = Scope.root()
         self.fun_specs = {}
         self.fun_defs = {}
+        for name, fun in (x for x in inspect.getmembers(self, inspect.ismethod) if x[0].startswith("tc_")):
+
+            def make_wrapper(fun: Callable) -> Any:
+                def wrapper(*args: Any, **kwargs: Any) -> Any:
+                    fun_desc = f"{fun.__name__}({', '.join(str(x) for x in args)})"
+                    log("typechecker-trace", f">>> {fun_desc}", self.nesting_level)
+                    self.nesting_level += 1
+                    res = fun(*args, **kwargs)
+                    self.nesting_level -= 1
+                    log("typechecker-trace", f"<<< {fun_desc} = {res}", self.nesting_level)
+                    return res
+
+                return wrapper
+
+            setattr(self, name, make_wrapper(fun))
 
     def fun_spec(self, fun: Fun, call_args: list[ast.Expr]) -> FunSpec | None:
         """Try to find a FunSpec for the given function with the given parameter types."""
@@ -302,7 +324,7 @@ class TypeCheck:
             return spec
         with self.child_type_env():
             fun_def = self.fun_defs[fun]
-            log("typechecker-mono", f">>> Specializing {fun} at call-site {span}")
+            log("typechecker-mono", f">>> Specializing {fun} at call-site {span}", self.nesting_level)
 
             params = [Attr(attr.name, self.type_env.get(arg)) for attr, arg in zip(fun.params, call_args)]
             specialized = Fun(fun.name, params, Typ(None), fun.span, builtin=fun.builtin)
@@ -314,10 +336,15 @@ class TypeCheck:
             log(
                 "typechecker-mono",
                 f"Type checking {spec.base} at {spec.fun_def.span} with {spec.specialized} at call-site {span}",
+                self.nesting_level,
             )
             typ = self.tc_fun_def_specialized(spec.fun_def, spec.specialized)
             spec.specialized.result = typ.typ.result
-            log("typechecker-mono", f"<<< Specialized {spec.base} at call-site {span} as {spec.specialized}")
+            log(
+                "typechecker-mono",
+                f"<<< Specialized {spec.base} at call-site {span} as {spec.specialized}",
+                self.nesting_level,
+            )
             specs = self.fun_specs.get(fun, [])
             specs.append(spec)
             self.fun_specs[fun] = specs
@@ -358,10 +385,17 @@ class TypeCheck:
             if not binding.typ.is_assignable_from(value):
                 return self.error(error.type_not_assignable_from(node.target.span, str(binding.typ), str(value)))
         else:
-            log("typechecker-trace", f"Binding {node.target.name} to {value}")
+            log("typechecker-trace", f"Binding {node.target.name} to {value}", self.nesting_level)
             self.scope.bind(node.target.name, value, mut=node.mut)
         self.type_env.set(node.target, value)
         return UnitTyp
+
+    def tc_attr(self, node: ast.Attr) -> Typ:
+        ast.walk(node, self.visit)
+        typ = self.type_env.get(node.shape)
+        if typ.is_error():
+            return typ
+        return Typ(Shape(None, [Attr(node.name, typ)], [], [], node.span))
 
     def tc_binary_expr(self, node: ast.BinaryExpr) -> Typ:
         ast.walk(node, self.visit)
@@ -397,6 +431,7 @@ class TypeCheck:
         if callee.typ.builtin:
             return callee.typ.result
         spec = self.specialize(callee.typ, node.args, node.span)
+        self.type_env.set(node.callee, Typ(spec.specialized))
         return spec.specialized.result
 
     def tc_fun_def(self, node: ast.FunDef) -> Typ:
@@ -410,12 +445,12 @@ class TypeCheck:
             ast.walk(node, self.visit)
         return_typ = self.type_env.get(node.body)
         typ = Typ(Fun(node.name, params, return_typ, node.span, builtin=False))
-        log("typechecker-trace", f"Adding {typ.typ} to fun_defs")
+        log("typechecker-trace", f"Adding {typ.typ} to fun_defs", self.nesting_level)
         self.fun_defs[typ.typ] = node
         if err := self.scope.bind(node.name, typ, mut=False):
             return self.error(err)
         if node.name == "main":
-            log("typechecker-trace", "Adding main to fun_defs")
+            log("typechecker-trace", "Adding main to fun_defs", self.nesting_level)
             fun = typ.typ
             if len(fun.params) != 0 or fun.result != UnitTyp:
                 return self.error(error.invalid_main(node.span))
@@ -442,12 +477,56 @@ class TypeCheck:
             return self.error(error.undefined_name(node.name, node.span))
         return name.typ
 
+    def tc_product_shape(self, node: ast.ProductShape) -> Typ:
+        ast.walk(node, self.visit)
+        attrs: list[Attr] = []
+        for attr in node.attrs:
+            typ = self.type_env.get(attr.shape)
+            if typ.is_error():
+                return typ
+            attrs.append(Attr(attr.name, typ))
+        return Typ(Shape(None, attrs, [], [], node.span))
+
+    def tc_shape_literal(self, node: ast.ShapeLit) -> Typ:
+        ast.walk(node, self.visit)
+        attrs: list[Attr] = []
+        for attr in node.attrs:
+            typ = self.type_env.get(attr.value)
+            if typ.is_error():
+                return typ
+            attrs.append(Attr(attr.name, typ))
+        # todo: type check if node.shape_ref is set
+        return Typ(Shape(None, attrs, [], [], node.span))
+
+    def tc_shape_literal_attr(self, node: ast.ShapeLitAttr) -> Typ:
+        ast.walk(node, self.visit)
+        typ = self.type_env.get(node.value)
+        if typ.is_error():
+            return typ
+        return Typ(Shape(None, [Attr(node.name, typ)], [], [], node.span))
+
+    def tc_shape_decl(self, node: ast.ShapeDecl) -> Typ:
+        ast.walk(node, self.visit)
+        typ = self.type_env.get(node.shape)
+        if typ.is_error():
+            return typ
+        if err := self.scope.bind(node.name, typ, mut=False):
+            return self.error(err)
+        return UnitTyp
+
+    def tc_shape_ref(self, node: ast.ShapeRef) -> Typ:
+        declared = self.scope.lookup(node.name)
+        if declared is None:
+            return self.error(error.undefined_name(node.name, node.span))
+        return declared.typ
+
     def visit(self, node: ast.Node, _parent: ast.Node | None) -> ast.Node:
-        log("typechecker-trace", f">>> visit {type(node).__name__} {node}")
         typ: Typ
         match node:
             case ast.Assign():
                 typ = self.tc_assign(node)
+            case ast.Attr():
+                typ = self.tc_attr(node)
             case ast.BinaryExpr():
                 typ = self.tc_binary_expr(node)
             case ast.Block():
@@ -466,11 +545,20 @@ class TypeCheck:
                 typ = self.tc_module(node)
             case ast.Name():
                 typ = self.tc_name(node)
+            case ast.ProductShape():
+                typ = self.tc_product_shape(node)
+            case ast.ShapeLit():
+                typ = self.tc_shape_literal(node)
+            case ast.ShapeLitAttr():
+                typ = self.tc_shape_literal_attr(node)
+            case ast.ShapeDecl():
+                typ = self.tc_shape_decl(node)
+            case ast.ShapeRef():
+                typ = self.tc_shape_ref(node)
             case ast.StrLit():
                 typ = StrTyp
             case _:
                 raise AssertionError(f"Don't know how to type check: {node!r}")
-        log("typechecker-trace", f"<<< visit {type(node).__name__} {node}: {typ}")
         self.type_env.set(node, typ)
         return node
 

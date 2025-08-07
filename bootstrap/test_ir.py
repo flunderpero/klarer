@@ -71,12 +71,12 @@ def test_simple_product_shape_literal() -> None:
     assert str(result) == strip("""
         s0 = "John"
 
-        name_Str_age_Int{Str, I64}
+        age_Int_name_Str{I64, Str}
 
         declare main() none:
         block_1:
             _1 = 42
-            _2 = alloc name_Str_age_Int{Str, I64}, Str s0, I64 _1
+            _2 = alloc age_Int_name_Str{I64, Str}, I64 _1, Str s0
             ret none _none
 
     """)
@@ -92,13 +92,13 @@ def test_read_member() -> None:
     assert str(result) == strip("""
         s0 = "Peter"
 
-        name_Str_age_Int{Str, I64}
+        age_Int_name_Str{I64, Str}
 
         declare main() none:
         block_1:
             _1 = 42
-            _2 = alloc name_Str_age_Int{Str, I64}, Str s0, I64 _1
-            _3 = getptr name_Str_age_Int{Str, I64} _2, *Str, 0
+            _2 = alloc age_Int_name_Str{I64, Str}, I64 _1, Str s0
+            _3 = getptr age_Int_name_Str{I64, Str} _2, *Str, 1
             _4 = load *Str _3
             call none print, Str _4
             ret none _none
@@ -116,13 +116,13 @@ def test_write_member() -> None:
         s0 = "Peter"
         s1 = "John"
 
-        name_Str_age_Int{Str, I64}
+        age_Int_name_Str{I64, Str}
 
         declare main() none:
         block_1:
             _1 = 42
-            _2 = alloc name_Str_age_Int{Str, I64}, Str s0, I64 _1
-            _3 = getptr name_Str_age_Int{Str, I64} _2, *Str, 0
+            _2 = alloc age_Int_name_Str{I64, Str}, I64 _1, Str s0
+            _3 = getptr age_Int_name_Str{I64, Str} _2, *Str, 1
             store Str s1, _3
             ret none _none
     """)

@@ -104,7 +104,7 @@ def typ(kind: Callable, **kwargs: Any) -> types.Typ:
     defaults: Any = {"span": Span("test.kl", "", 0, 0)}
     match kind:
         case types.Shape:
-            defaults.update({"name": None, "attrs": [], "variants": [], "behaviours": []})
+            defaults.update({"name": None, "attrs": (), "variants": (), "behaviours": ()})
         case types.Fun:
             defaults.update({"name": None, "builtin": False})
     return types.Typ(kind(**defaults | kwargs))
@@ -117,10 +117,10 @@ def typecheck(code: str) -> TypeChecker:
     return TypeChecker(module, result.type_env)
 
 
-def typecheck_err(code: str) -> list[error.Error]:
+def typecheck_err(code: str) -> tuple[list[error.Error], list[str]]:
     module = parse(code)
     result = types.typecheck(module)
-    return result.errors
+    return result.errors, [x.short_message() for x in result.errors]
 
 
 def generate_ir(code: str) -> ir.IR:

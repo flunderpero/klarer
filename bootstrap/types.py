@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import inspect
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any, Callable, Literal
 
 from . import ast, error
@@ -12,45 +12,44 @@ if TYPE_CHECKING:
     from collections.abc import Generator
 
 
-@dataclass
+@dataclass(eq=True, frozen=True)
 class Behaviour:
     name: str
-    funs: list[Fun]
+    funs: tuple[Fun, ...]
 
     def __str__(self) -> str:
         return f"@{self.name}"
 
-    def __eq__(self, other: object) -> bool:
+    def is_same(self, other: object) -> bool:
         return isinstance(other, Behaviour) and self.name == other.name
-
-    def __hash__(self) -> int:
-        return hash(str(self))
 
     def mangled_name(self) -> str:
         return self.name
 
 
-@dataclass
+@dataclass(eq=True, frozen=True)
 class Primitive:
     name: Literal["Bool", "Char", "Int", "Str", "Unit"]
-    behaviours: list[Behaviour]
-    span: Span
+    behaviours: tuple[Behaviour, ...]
+    span: Span = field(compare=False, hash=False)
 
     def __str__(self) -> str:
         behaviours = " bind " + " + ".join(str(x) for x in self.behaviours) if self.behaviours else ""
         return f"{self.name}{behaviours}"
 
-    def __eq__(self, other: object) -> bool:
+    def is_same(self, other: object) -> bool:
         return isinstance(other, Primitive) and self.name == other.name
-
-    def __hash__(self) -> int:
-        return hash(str(self))
 
     def mangled_name(self) -> str:
         return self.name
 
+    def subsumes(self, other: Typ) -> bool:
+        # For now, all primitives never subsume anything. Later on, when we have different
+        # sized integers, I16 will subsume I8, etc.
+        return self == other
 
-@dataclass
+
+@dataclass(eq=True, frozen=True)
 class Attr:
     name: str
     typ: Typ
@@ -58,23 +57,31 @@ class Attr:
     def __str__(self) -> str:
         return self.name + " " + str(self.typ)
 
-    def __eq__(self, other: object) -> bool:
+    def is_same(self, other: object) -> bool:
         return isinstance(other, Attr) and self.name == other.name and self.typ == other.typ
-
-    def __hash__(self) -> int:
-        return hash(str(self))
 
     def mangled_name(self) -> str:
         return self.name + "_" + self.typ.mangled_name()
 
+    def subsumes(self, other: Typ) -> bool:
+        return isinstance(other, Attr) and self.name == other.name and self.typ.subsumes(other.typ)
 
-@dataclass
+
+def same_tuple(a: tuple[Any, ...], b: tuple[Any, ...]) -> bool:
+    return sorted_tuple(a) == sorted_tuple(b)
+
+
+def sorted_tuple(a: tuple[Any, ...]) -> tuple[Any, ...]:
+    return tuple(sorted(a, key=lambda x: x.mangled_name()))
+
+
+@dataclass(eq=True, frozen=True)
 class Shape:
     name: str | None
-    attrs: list[Attr]
-    variants: list[Typ]
-    behaviours: list[Behaviour]
-    span: Span
+    attrs: tuple[Attr, ...]
+    variants: tuple[Typ, ...]
+    behaviours: tuple[Behaviour, ...]
+    span: Span = field(compare=False, hash=False)
 
     def is_named(self) -> bool:
         return self.name is not None
@@ -82,39 +89,79 @@ class Shape:
     def attr(self, name: str) -> Attr | None:
         return next((x for x in self.attrs if x.name == name), None)
 
-    def attr_index(self, name: str) -> int | None:
-        return next((i for i, x in enumerate(self.attrs) if x.name == name), None)
-
     def __str__(self) -> str:
         variants = " | " + " | ".join(str(x) for x in self.variants) if self.variants else ""
         behaviours = " bind " + " + ".join(str(x) for x in self.behaviours) if self.behaviours else ""
         name = f" {self.name}" if self.name else ""
-        return f"{name}{{{self.attrs}}}{variants}{behaviours}"
+        attrs = ", ".join(str(x) for x in self.attrs)
+        return f"{name}{{{attrs}}}{variants}{behaviours}"
 
-    def __eq__(self, other: object) -> bool:
+    def is_same(self, other: object) -> bool:
         return (
             isinstance(other, Shape)
-            and self.attrs == other.attrs
-            and self.variants == other.variants
-            and self.behaviours == other.behaviours
+            and same_tuple(self.attrs, other.attrs)
+            and same_tuple(self.variants, other.variants)
+            and same_tuple(self.behaviours, other.behaviours)
         )
 
-    def __hash__(self) -> int:
-        return hash(str(self))
+    @property
+    def attrs_sorted(self) -> tuple[Attr, ...]:
+        return tuple(sorted(self.attrs, key=lambda x: x.name))
 
     def mangled_name(self) -> str:
-        name = [x.mangled_name() for x in self.attrs + self.variants + self.behaviours]
+        name = [
+            x.mangled_name()
+            for x in sorted_tuple(self.attrs) + sorted_tuple(self.variants) + sorted_tuple(self.behaviours)
+        ]
         if self.name:
             return self.name + "_" + "_".join(name)
         return "_".join(name)
 
+    def is_empty(self) -> bool:
+        return not self.attrs and not self.variants
 
-@dataclass
+    def subsumes(self, other: Typ) -> bool:
+        """A shape subsumes the other shape if it has at least all the
+        attributes, variants, and behaviours of the other shape.
+
+        The empty shape `{}` subsumes any other shape, function, or primitive.
+
+        Examples:
+        - {name Str, age Int} subsumes {name Str}
+        - {} subsumes any shape, function, or primitive
+
+        """
+        if not isinstance(other, (Shape, Primitive, Fun)):
+            return False
+        if self.is_empty():
+            return True  # {} subsumes everything
+        if not isinstance(other, Shape):
+            return False
+
+        # All attributes of `other` must be present in `self`.
+        for attr in other.attrs:
+            if not any(x.typ.subsumes(attr.typ) for x in self.attrs):
+                return False  # Other is missing a required attribute
+
+        # All variants of `other` must be present in `self`.
+        for variant in other.variants:
+            if not any(x.typ.subsumes(variant.typ) for x in self.variants):
+                return False
+
+        # All behaviours of `other` must be present in `self`.
+        for behaviour in other.behaviours:  # noqa: SIM110
+            if not any(x.is_same(behaviour) for x in self.behaviours):
+                return False
+
+        return True
+
+
+@dataclass(eq=True, frozen=True)
 class Fun:
     name: str | None
-    params: list[Attr]
+    params: tuple[Attr, ...]
     result: Typ
-    span: Span
+    span: Span = field(compare=False, hash=False)
     builtin: bool
 
     @property
@@ -126,11 +173,8 @@ class Fun:
         name = f" {self.name}" if self.name else ""
         return f"fun{name}({params}) -> {self.result}"
 
-    def __eq__(self, other: object) -> bool:
+    def is_same(self, other: object) -> bool:
         return isinstance(other, Fun) and self.params == other.params and self.result == other.result
-
-    def __hash__(self) -> int:
-        return hash(str(self))
 
     def mangled_name(self) -> str:
         if self.builtin:
@@ -140,6 +184,25 @@ class Fun:
         if self.name:
             return self.name + "_" + "_".join(params)
         return "_".join(params)
+
+    def subsumes(self, other: Typ) -> bool:
+        """A function subsumes the other function if all its parameters and
+        result subsume the other function's parameters and result.
+
+        Examples:
+        - fun(a {name Str}) subsumes fun(a {name Str})
+
+        """
+        if not isinstance(other, Fun):
+            return False
+        if len(self.params) != len(other.params):
+            return False
+        if not self.result.subsumes(other.result):
+            return False
+        for param, other_param in zip(self.params, other.params):  # noqa: SIM110
+            if not param.typ.subsumes(other_param.typ):
+                return False
+        return True
 
 
 @dataclass
@@ -167,13 +230,12 @@ class Typ[T: Primitive | Shape | Fun | error.Error | None]:
     def is_fun(self) -> bool:
         return self.typ is not None and isinstance(self.typ, Fun)
 
-    def is_assignable_from(self, other: Typ) -> bool:
-        if self.is_none():
+    def subsumes(self, other: Typ) -> bool:
+        if self.typ is None:
             return other.is_none()
-        if isinstance(self.typ, Primitive):
-            return isinstance(other.typ, Primitive) and self.typ.name == other.typ.name
-        # todo: check more types
-        return False
+        if isinstance(self.typ, error.Error):
+            return False
+        return self.typ.subsumes(other.typ)
 
     def merge(self, other: Typ) -> None:
         if self.is_none():
@@ -182,11 +244,12 @@ class Typ[T: Primitive | Shape | Fun | error.Error | None]:
             pass
         # todo: merge more types
 
-    def __eq__(self, other: object) -> bool:
-        return isinstance(other, Typ) and self.typ == other.typ
-
-    def __hash__(self) -> int:
-        return hash(str(self))
+    def is_same(self, other: Typ) -> bool:
+        if self.typ is None:
+            return other.typ is None
+        if isinstance(self.typ, error.Error):
+            return False
+        return self.typ.is_same(other.typ)
 
     def mangled_name(self) -> str:
         if self.typ is None:
@@ -194,13 +257,23 @@ class Typ[T: Primitive | Shape | Fun | error.Error | None]:
         assert not isinstance(self.typ, error.Error), f"Type {self.typ} must be resolved before mangling"
         return self.typ.mangled_name()
 
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, Typ):
+            return NotImplemented
+        return self.typ == other.typ
+
+    def __hash__(self) -> int:
+        if self.typ is None:
+            return 0
+        return hash(self.typ)
+
 
 builtin_span = Span("<builtin", "", 0, 0)
-BoolTyp = Typ(Primitive("Bool", [], builtin_span))
-CharTyp = Typ(Primitive("Char", [], builtin_span))
-IntTyp = Typ(Primitive("Int", [], builtin_span))
-StrTyp = Typ(Primitive("Str", [], builtin_span))
-UnitTyp = Typ(Primitive("Unit", [], builtin_span))
+BoolTyp = Typ(Primitive("Bool", (), builtin_span))
+CharTyp = Typ(Primitive("Char", (), builtin_span))
+IntTyp = Typ(Primitive("Int", (), builtin_span))
+StrTyp = Typ(Primitive("Str", (), builtin_span))
+UnitTyp = Typ(Primitive("Unit", (), builtin_span))
 
 
 @dataclass
@@ -247,7 +320,7 @@ class Scope:
         span = Span("<builtin>", "", 0, 0)
         scope = Scope(None, None, {})
         scope.bindings["print"] = Binding(
-            Typ(Fun("print", [Attr("s", StrTyp)], UnitTyp, span=span, builtin=True)),
+            Typ(Fun("print", (Attr("s", StrTyp),), UnitTyp, span=span, builtin=True)),
             mut=False,
             builtin=True,
         )
@@ -332,7 +405,7 @@ class TypeCheck:
             fun_def = self.fun_defs[fun]
             log("typechecker-mono", f">>> Specializing {fun} at call-site {span}", self.nesting_level)
 
-            params = [Attr(attr.name, self.type_env.get(arg)) for attr, arg in zip(fun.params, call_args)]
+            params = (*(Attr(attr.name, self.type_env.get(arg)) for attr, arg in zip(fun.params, call_args)),)
             specialized = Fun(fun.name, params, Typ(None), fun.span, builtin=fun.builtin)
 
             base = self.type_env.get(fun_def)
@@ -345,7 +418,7 @@ class TypeCheck:
                 self.nesting_level,
             )
             typ = self.tc_fun_def_specialized(spec.fun_def, spec.specialized)
-            spec.specialized.result = typ.typ.result
+            spec.specialized = replace(spec.specialized, result=typ.typ.result)
             log(
                 "typechecker-mono",
                 f"<<< Specialized {spec.base} at call-site {span} as {spec.specialized}",
@@ -389,7 +462,7 @@ class TypeCheck:
                 if binding is not None:
                     if not binding.mut:
                         return self.error(error.not_mutable(node.target.name, node.target.span))
-                    if not binding.typ.is_assignable_from(value):
+                    if not binding.typ.is_same(value):
                         return self.error(error.not_assignable_from(node.target.span, str(binding.typ), str(value)))
                 else:
                     log("typechecker-trace", f"Binding {node.target.name} to {value}", self.nesting_level)
@@ -405,7 +478,7 @@ class TypeCheck:
                     return self.error(
                         error.no_member(node.target.name, str(shape), node.target.span, node.target.target.span)
                     )
-                if not attr.typ.is_assignable_from(value):
+                if not attr.typ.is_same(value):
                     return self.error(error.not_assignable_from(node.target.span, str(attr.typ), str(value)))
             case _:
                 raise AssertionError(f"Unsupported target type: {node.target}")
@@ -416,7 +489,7 @@ class TypeCheck:
         typ = self.type_env.get(node.shape)
         if typ.is_error():
             return typ
-        return Typ(Shape(None, [Attr(node.name, typ)], [], [], node.span))
+        return Typ(Shape(None, (Attr(node.name, typ),), (), (), node.span))
 
     def tc_binary_expr(self, node: ast.BinaryExpr) -> Typ:
         ast.walk(node, self.visit)
@@ -429,7 +502,7 @@ class TypeCheck:
         # We can directly merge the types of the two operands.
         lhs.merge(rhs)
         rhs.merge(lhs)
-        if not lhs.is_assignable_from(rhs):
+        if not rhs.subsumes(lhs):
             return self.error(error.not_assignable_from(node.span, str(lhs), str(rhs)))
         return BoolTyp
 
@@ -465,7 +538,7 @@ class TypeCheck:
                 params.append(Attr(param, param_typ))
             ast.walk(node, self.visit)
         return_typ = self.type_env.get(node.body)
-        typ = Typ(Fun(node.name, params, return_typ, node.span, builtin=False))
+        typ = Typ(Fun(node.name, (*params,), return_typ, node.span, builtin=False))
         log("typechecker-trace", f"Adding {typ.typ} to fun_defs", self.nesting_level)
         self.fun_defs[typ.typ] = node
         if err := self.scope.bind(node.name, typ, mut=False):
@@ -498,7 +571,7 @@ class TypeCheck:
                     return self.error(err)
             ast.walk(node, self.visit)
         return_typ = self.type_env.get(node.body)
-        fun.result = return_typ
+        fun = replace(fun, result=return_typ)
         return Typ(fun)
 
     def tc_module(self, node: ast.Module) -> Typ:
@@ -519,7 +592,7 @@ class TypeCheck:
             if typ.is_error():
                 return typ
             attrs.append(Attr(attr.name, typ))
-        return Typ(Shape(None, attrs, [], [], node.span))
+        return Typ(Shape(None, tuple(attrs), (), (), node.span))
 
     def tc_shape_literal(self, node: ast.ShapeLit) -> Typ:
         ast.walk(node, self.visit)
@@ -529,15 +602,23 @@ class TypeCheck:
             if typ.is_error():
                 return typ
             attrs.append(Attr(attr.name, typ))
-        # todo: type check if node.shape_ref is set
-        return Typ(Shape(None, attrs, [], [], node.span))
+        typ = Typ(Shape(None, tuple(attrs), (), (), node.span))
+        if node.shape_ref:
+            expected_shape = self.scope.lookup(node.shape_ref.name)
+            if expected_shape is None:
+                return self.error(error.undefined_name(node.shape_ref.name, node.shape_ref.span))
+            if not typ.subsumes(expected_shape.typ):
+                return self.error(
+                    error.does_not_conform_to_shape(node.shape_ref.span, node.shape_ref.name, str(typ.typ))
+                )
+        return typ
 
     def tc_shape_literal_attr(self, node: ast.ShapeLitAttr) -> Typ:
         ast.walk(node, self.visit)
         typ = self.type_env.get(node.value)
         if typ.is_error():
             return typ
-        return Typ(Shape(None, [Attr(node.name, typ)], [], [], node.span))
+        return Typ(Shape(None, (Attr(node.name, typ),), (), (), node.span))
 
     def tc_shape_decl(self, node: ast.ShapeDecl) -> Typ:
         ast.walk(node, self.visit)

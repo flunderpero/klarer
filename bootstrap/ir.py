@@ -495,7 +495,7 @@ class FunGen:
                 name = typ.mangled_name()
                 if existing := self.ir.structs.get(name):
                     return existing
-                struct = Struct(typ.mangled_name(), [self.typ(x.typ) for x in typ.typ.attrs])
+                struct = Struct(typ.mangled_name(), [self.typ(x.typ) for x in typ.typ.attrs_sorted])
                 self.ir.structs[name] = struct
                 return struct
             case types.Fun():
@@ -644,7 +644,9 @@ class FunGen:
                 self.emit(IntConst(reg, value=int(node.value)), node)
             case ast.ShapeLit():
                 ast.walk(node, self.generate)
-                regs = [self.node_regs[x.id] for x in node.attrs]
+                # We need to sort the attributes by name because we did so in `typ()` when
+                # construction the struct type.
+                regs = [self.node_regs[x.id] for x in sorted(node.attrs, key=lambda x: x.name)]
                 typ = self.typ(self.type_env.get(node))
                 reg = self.reg(typ)
                 self.emit(Alloc(reg, regs), node)
@@ -676,7 +678,7 @@ class FunGen:
                 types_src = self.type_env.get(node.target)
                 assert isinstance(src.typ, Struct), f"Expected Struct, got {src.typ}"
                 assert isinstance(types_src.typ, types.Shape), f"Expected Shape, got {types_src}"
-                attr_index = types_src.typ.attr_index(node.name)
+                attr_index = types_src.typ.attrs_sorted.index(types_src.typ.attr(node.name))
                 assert attr_index is not None, f"No member {node.name} in type {types_src}"
                 getptr_reg = self.reg(Ptr(src.typ.fields[attr_index]))
                 if isinstance(parent, ast.Assign):
@@ -745,6 +747,8 @@ class FunGen:
                                 raise AssertionError(f"Unsupported type for equality comparison: {lhs_reg.typ}")
                     case _:
                         raise AssertionError(f"Unsupported binary op: {node.op}")
+            case ast.ShapeRef():
+                pass
             case _:
                 raise AssertionError(f"Unsupported node: {node.__class__}")
         return node

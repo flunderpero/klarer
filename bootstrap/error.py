@@ -108,8 +108,8 @@ def unexpected_token(span: Span, got: str, *expected: str) -> Error:
     return SimpleError(span, f"{prefix}{expected_names}, got `{got}`", _stack())
 
 
-def expected_assignment(span: Span) -> Error:
-    return SimpleError(span, "Expected an assignment", _stack())
+def expected_assignment(got: str, span: Span) -> Error:
+    return SimpleError(span, f"Expected an assignment but got `{got}`", _stack())
 
 
 def expected_block_node(span: Span, token: str) -> Error:
@@ -154,7 +154,11 @@ def wrong_number_of_type_args(type_params: int, type_args: int, span: Span, defi
 
 
 def not_assignable_from(span: Span, target: str, from_: str) -> Error:
-    return SimpleError(span, f"`{from_}` is not assignable to type `{target}`", _stack())
+    return SimpleError(span, f"`{from_}` is not assignable to `{target}`", _stack())
+
+
+def does_not_conform_to_shape(span: Span, target: str, from_: str) -> Error:
+    return SimpleError(span, f"`{from_}` does not conform to shape `{target}`", _stack())
 
 
 def not_mutable(name: str, span: Span) -> Error:

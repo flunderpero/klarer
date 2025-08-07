@@ -381,11 +381,20 @@ class Parser:
             match self.input.peek().kind:
                 case token.Kind.paren_left:
                     expr = self.parse_call(expr)
-                # case token.Kind.dot:
-                #     expr = self.parse_member(expr)
+                case token.Kind.dot:
+                    expr = self.parse_member(expr)
                 case _:
                     break
         return expr
+
+    def parse_member(self, target: ast.Expr) -> ast.Member | None:
+        span = self.input.span()
+        if not self.expect(token.Kind.dot):
+            return None
+        name = self.expect_ident()
+        if not name:
+            return None
+        return ast.Member(self.id(), target, name, self.input.span_merge(span))
 
     def parse_shape_literal(self) -> ast.ShapeLit | None:
         span = self.input.span()

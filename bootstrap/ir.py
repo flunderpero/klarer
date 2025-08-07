@@ -151,7 +151,7 @@ class Store:
     src: Reg
 
     def __str__(self) -> str:
-        return f"store {self.src.typ} {self.src} {self.target}"
+        return f"store {self.src.typ} {self.src}, {self.target}"
 
     @property
     def reg(self) -> Reg:
@@ -670,6 +670,21 @@ class FunGen:
                 assert isinstance(fn_typ, Fun), f"Expected Fn, got {fn_typ}"
                 self.emit(GetFnPtr(getptr_reg, fn_typ), None)
                 self.node_regs[node.id] = getptr_reg
+            case ast.Member():
+                ast.walk(node, self.generate)
+                src = self.node_regs[node.target.id]
+                types_src = self.type_env.get(node.target)
+                assert isinstance(src.typ, Struct), f"Expected Struct, got {src.typ}"
+                assert isinstance(types_src.typ, types.Shape), f"Expected Shape, got {types_src}"
+                attr_index = types_src.typ.attr_index(node.name)
+                assert attr_index is not None, f"No member {node.name} in type {types_src}"
+                getptr_reg = self.reg(Ptr(src.typ.fields[attr_index]))
+                if isinstance(parent, ast.Assign):
+                    self.emit(GetPtr(getptr_reg, src, attr_index), node)
+                else:
+                    self.emit(GetPtr(getptr_reg, src, attr_index), None)
+                    reg = self.reg(src.typ.fields[attr_index])
+                    self.emit(Load(reg, getptr_reg), node)
             case ast.Call():
                 callee = self.type_env.get(node.callee)
                 assert isinstance(callee.typ, types.Fun), f"Expected Fun, got {callee}"
@@ -701,6 +716,11 @@ class FunGen:
                             self.scope.declare(src.name, self.node_regs[node.value.id])
                         else:
                             self.scope.update(src.name, self.node_regs[node.value.id])
+                    case ast.Member():
+                        print("aaa", src)
+                        reg = self.node_regs[src.id]
+                        value_reg = self.node_regs[node.value.id]
+                        self.emit(Store(reg, value_reg), node)
                     case _:
                         raise AssertionError(f"Unsupported target type: {src}")
                 self.node_regs[node.id] = NoneReg

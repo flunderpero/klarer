@@ -165,6 +165,10 @@ def test_nested_shape_literal_with_shape_ref() -> None:
     )
 
 
+def test_member() -> None:
+    assert parse_first("foo.bar") == node(ast.Member, target=node(ast.Name, name="foo"), name="bar")
+
+
 def test_call() -> None:
     assert parse_first("foo()") == node(ast.Call, callee=node(ast.Name, name="foo"), args=[])
     assert parse_first("foo(42)") == node(

@@ -153,8 +153,8 @@ def wrong_number_of_type_args(type_params: int, type_args: int, span: Span, defi
     )
 
 
-def type_not_assignable_from(span: Span, target: str, from_: str) -> Error:
-    return SimpleError(span, f"Type `{from_}` is not assignable to type `{target}`", _stack())
+def not_assignable_from(span: Span, target: str, from_: str) -> Error:
+    return SimpleError(span, f"`{from_}` is not assignable to type `{target}`", _stack())
 
 
 def not_mutable(name: str, span: Span) -> Error:

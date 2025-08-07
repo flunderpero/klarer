@@ -79,6 +79,12 @@ class Shape:
     def is_named(self) -> bool:
         return self.name is not None
 
+    def attr(self, name: str) -> Attr | None:
+        return next((x for x in self.attrs if x.name == name), None)
+
+    def attr_index(self, name: str) -> int | None:
+        return next((i for i, x in enumerate(self.attrs) if x.name == name), None)
+
     def __str__(self) -> str:
         variants = " | " + " | ".join(str(x) for x in self.variants) if self.variants else ""
         behaviours = " bind " + " + ".join(str(x) for x in self.behaviours) if self.behaviours else ""
@@ -373,21 +379,36 @@ class TypeCheck:
         return Typ(err)
 
     def tc_assign(self, node: ast.Assign) -> Typ:
-        assert isinstance(node.target, ast.Name), f"For now, only ast.Name can be assigned, but got {node.target}"
         self.visit(node.value, None)
         value = self.type_env.get(node.value)
         if value.is_error():
             return value
-        binding = self.scope.lookup(node.target.name)
-        if binding is not None:
-            if not binding.mut:
-                return self.error(error.not_mutable(node.target.name, node.target.span))
-            if not binding.typ.is_assignable_from(value):
-                return self.error(error.type_not_assignable_from(node.target.span, str(binding.typ), str(value)))
-        else:
-            log("typechecker-trace", f"Binding {node.target.name} to {value}", self.nesting_level)
-            self.scope.bind(node.target.name, value, mut=node.mut)
-        self.type_env.set(node.target, value)
+        match node.target:
+            case ast.Name():
+                binding = self.scope.lookup(node.target.name)
+                if binding is not None:
+                    if not binding.mut:
+                        return self.error(error.not_mutable(node.target.name, node.target.span))
+                    if not binding.typ.is_assignable_from(value):
+                        return self.error(error.not_assignable_from(node.target.span, str(binding.typ), str(value)))
+                else:
+                    log("typechecker-trace", f"Binding {node.target.name} to {value}", self.nesting_level)
+                    self.scope.bind(node.target.name, value, mut=node.mut)
+                self.type_env.set(node.target, value)
+            case ast.Member():
+                ast.walk(node.target, self.visit)
+                shape = self.type_env.get(node.target.target)
+                if shape.is_error():
+                    return shape
+                attr = shape.typ.attr(node.target.name)
+                if attr is None:
+                    return self.error(
+                        error.no_member(node.target.name, str(shape), node.target.span, node.target.target.span)
+                    )
+                if not attr.typ.is_assignable_from(value):
+                    return self.error(error.not_assignable_from(node.target.span, str(attr.typ), str(value)))
+            case _:
+                raise AssertionError(f"Unsupported target type: {node.target}")
         return UnitTyp
 
     def tc_attr(self, node: ast.Attr) -> Typ:
@@ -409,7 +430,7 @@ class TypeCheck:
         lhs.merge(rhs)
         rhs.merge(lhs)
         if not lhs.is_assignable_from(rhs):
-            return self.error(error.type_not_assignable_from(node.span, str(lhs), str(rhs)))
+            return self.error(error.not_assignable_from(node.span, str(lhs), str(rhs)))
         return BoolTyp
 
     def tc_block(self, node: ast.Block) -> Typ:
@@ -456,6 +477,19 @@ class TypeCheck:
                 return self.error(error.invalid_main(node.span))
             self.fun_specs[fun] = [FunSpec(self.type_env, node, fun, fun)]
         return typ
+
+    def tc_member(self, node: ast.Member) -> Typ:
+        ast.walk(node, self.visit)
+        typ = self.type_env.get(node.target)
+        if typ.is_error():
+            return typ
+        shape = typ.typ
+        if not isinstance(shape, Shape):
+            return self.error(error.unexpected_type(f"a shape with field `{node.name}`", str(shape), node.target.span))
+        attr = shape.attr(node.name)
+        if not attr:
+            return self.error(error.no_member(node.name, str(shape), node.target.span, node.span))
+        return attr.typ
 
     def tc_fun_def_specialized(self, node: ast.FunDef, fun: Fun) -> Typ:
         with self.child_scope(node):
@@ -541,6 +575,8 @@ class TypeCheck:
                 typ = self.tc_fun_def(node)
             case ast.IntLit():
                 typ = IntTyp
+            case ast.Member():
+                typ = self.tc_member(node)
             case ast.Module():
                 typ = self.tc_module(node)
             case ast.Name():

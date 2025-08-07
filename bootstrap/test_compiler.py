@@ -33,41 +33,57 @@ def test_call() -> None:
     """)
 
 
-def test_simple_product_shape_literal() -> None:
-    stdout = compile_and_run_success(
-        """
-        f = fun (a) do end
-
+def test_read_member_of_simple_shape_literal() -> None:
+    stdout = compile_and_run_success("""
         main = fun() do
-            p = {name = "John", age = 42}
-            f(p)
-            print("PASS")
+            foo = {name = "PASS", age = 42}
+            print(foo.name)
         end
-    """
-    )
-    # todo: do something with `p` in the code above
-    # todo: the `f` function above is only there to prevent unused variable warnings
-    #       in Go.
+    """)
     assert stdout == stripln("""
         PASS
     """)
 
 
-def test_nested_product_shape_literal() -> None:
+def test_read_member_of_nested_shape_literal() -> None:
     stdout = compile_and_run_success(
         """
-        f = fun (a) do end
-
         main = fun() do
-            p = {name = "John", age = {years = 42}}
-            f(p)
-            print("PASS")
+            foo = {value = {pass = "PASS", age = 42}}
+            print(foo.value.pass)
         end
     """
     )
-    # todo: do something with `p` in the code above
-    # todo: the `f` function above is only there to prevent unused variable warnings
-    #       in Go.
+    assert stdout == stripln("""
+        PASS
+    """)
+
+
+def test_write_member_of_simple_shape_literal() -> None:
+    stdout = compile_and_run_success(
+        """
+        main = fun() do
+            foo = {name = "FAIL", age = 42}
+            foo.name = "PASS"
+            print(foo.name)
+        end
+    """
+    )
+    assert stdout == stripln("""
+        PASS
+    """)
+
+
+def test_write_member_of_nested_shape_literal() -> None:
+    stdout = compile_and_run_success(
+        """
+        main = fun() do
+            foo = {value = {pass = "FAIL", age = 42}}
+            foo.value.pass = "PASS"
+            print(foo.value.pass)
+        end
+    """
+    )
     assert stdout == stripln("""
         PASS
     """)

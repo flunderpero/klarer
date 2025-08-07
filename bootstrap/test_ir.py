@@ -80,3 +80,49 @@ def test_simple_product_shape_literal() -> None:
             ret none _none
 
     """)
+
+
+def test_read_member() -> None:
+    result = generate_ir("""
+        main = fun() do
+            foo = {name = "Peter", age = 42}
+            print(foo.name)
+        end
+    """)
+    assert str(result) == strip("""
+        s0 = "Peter"
+
+        name_Str_age_Int{Str, I64}
+
+        declare main() none:
+        block_1:
+            _1 = 42
+            _2 = alloc name_Str_age_Int{Str, I64}, Str s0, I64 _1
+            _3 = getptr name_Str_age_Int{Str, I64} _2, *Str, 0
+            _4 = load *Str _3
+            call none print, Str _4
+            ret none _none
+    """)
+
+
+def test_write_member() -> None:
+    result = generate_ir("""
+        main = fun() do
+            foo = {name = "Peter", age = 42}
+            foo.name = "John"
+        end
+    """)
+    assert str(result) == strip("""
+        s0 = "Peter"
+        s1 = "John"
+
+        name_Str_age_Int{Str, I64}
+
+        declare main() none:
+        block_1:
+            _1 = 42
+            _2 = alloc name_Str_age_Int{Str, I64}, Str s0, I64 _1
+            _3 = getptr name_Str_age_Int{Str, I64} _2, *Str, 0
+            store Str s1, _3
+            ret none _none
+    """)

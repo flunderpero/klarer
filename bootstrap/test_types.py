@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from . import ast, types
-from .conftest import typ, typecheck
+from .conftest import typ, typecheck, typecheck_err
 
 
 def test_literals() -> None:
@@ -113,3 +113,25 @@ def test_shape_literal() -> None:
             attrs=[types.Attr("name", types.StrTyp), types.Attr("age", types.IntTyp)],
         )
     )
+
+
+def test_read_member() -> None:
+    tc = typecheck("""
+        foo = {name = "Peter", age = 42}
+        foo.name
+    """)
+    assert tc.type_at(2, 1, ast.Member) == types.StrTyp
+
+
+def test_write_member() -> None:
+    typecheck("""
+        foo = {name = "Peter", age = 42}
+        foo.name = "John"
+    """)
+
+    errors = typecheck_err("""
+        foo = {name = "Peter", age = 42}
+        foo.name = 42
+    """)
+    assert len(errors) == 1
+    assert errors[0].short_message() == "`Int` is not assignable to type `Str`"

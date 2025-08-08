@@ -179,6 +179,10 @@ main = fun() do
 end
 ```
 
+```
+PASS
+```
+
 **At least one if case**
 
 ```klarer

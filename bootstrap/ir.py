@@ -626,8 +626,9 @@ class FunGen:
                 if not types_typ.is_unit():
                     reg = self.reg(self.typ(types_typ))
                     phis = []
-                    for block in then_blocks:
-                        phis.append(PhiIn(reg, block))
+                    for arm, block in zip(arms, then_blocks):
+                        block_reg = self.node_regs[arm[1].id]
+                        phis.append(PhiIn(block_reg, block))
                     self.emit(Phi(reg, phis), node)
                 else:
                     self.node_regs[node.id] = NoneReg

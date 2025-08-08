@@ -224,6 +224,9 @@ class Typ[T: Primitive | Shape | Fun | error.Error | None]:
     def is_none(self) -> bool:
         return self.typ is None
 
+    def is_unit(self) -> bool:
+        return self.typ is not None and isinstance(self.typ, Primitive) and self.typ.name == "Unit"
+
     def is_primitive(self) -> bool:
         return self.typ is not None and isinstance(self.typ, Primitive)
 
@@ -566,6 +569,25 @@ class TypeCheck:
             self.fun_specs[fun] = [FunSpec(self.type_env, node, fun, fun)]
         return typ
 
+    def tc_if(self, node: ast.If) -> Typ:
+        ast.walk(node, self.visit)
+        # todo: for now, all arms and the else block must have the same type.
+        typ = self.type_env.get(node.arms[0])
+        for arm in node.arms:
+            arm_typ = self.tc_if_arm(arm)
+            if not typ.is_same(arm_typ):
+                return self.error(error.unexpected_type(str(typ), str(arm_typ), arm.span))
+        if node.else_block:
+            else_typ = self.tc_block(node.else_block)
+            # todo: if/else with different types should create a union type.
+            if not typ.is_same(else_typ):
+                return self.error(error.not_assignable_from(node.span, str(typ), str(else_typ)))
+        return typ
+
+    def tc_if_arm(self, node: ast.IfArm) -> Typ:
+        ast.walk(node, self.visit)
+        return self.tc_block(node.block)
+
     def tc_member(self, node: ast.Member) -> Typ:
         ast.walk(node, self.visit)
         typ = self.type_env.get(node.target)
@@ -669,6 +691,10 @@ class TypeCheck:
                 typ = CharTyp
             case ast.FunDef():
                 typ = self.tc_fun_def(node)
+            case ast.If():
+                typ = self.tc_if(node)
+            case ast.IfArm():
+                typ = self.tc_if_arm(node)
             case ast.IntLit():
                 typ = IntTyp
             case ast.Member():

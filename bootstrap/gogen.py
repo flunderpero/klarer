@@ -37,6 +37,10 @@ class Code:
             self.lines[-1] = self.indent_ * 4 * " "
         self.lines[-1] += s
 
+    def writeln(self, s: str) -> None:
+        self.write(s)
+        self.newline()
+
 
 def typ(typ: ir.Typ) -> str:
     match typ:
@@ -55,49 +59,114 @@ def typ(typ: ir.Typ) -> str:
 class FuncGen:
     fun_ir: ir.FunIR
     getptrs: dict[ir.Reg, ir.GetPtr]
+    # This represents PHI constraints. When we encounter a PHI node, we have
+    # to make sure to use the same Go variable name for all incoming registers.
+    reg_map: dict[ir.Reg, ir.Reg]
 
     def __init__(self, fun_ir: ir.FunIR) -> None:
         self.fun_ir = fun_ir
         self.getptrs = {}
+        self.reg_map = {}
+
+    def reg(self, reg: ir.Reg) -> ir.Reg:
+        if reg in self.reg_map:
+            return self.reg_map[reg]
+        return reg
 
     def inst(self, inst: ir.Inst, code: Code) -> None:
+        inst_reg = self.reg(inst.reg)
+        is_phi_reg = inst.reg.id != inst_reg.id
+        assign = ":="
+        if is_phi_reg:
+            assign = "="
         match inst:
             case ir.Alloc():
-                assert isinstance(inst.reg.typ, ir.Struct)
-                struct_name = inst.reg.typ.fqn
-                code.write(f"{inst.reg.id} := &{struct_name}{{")
-                for i, reg in enumerate(inst.args):
+                assert isinstance(inst_reg.typ, ir.Struct)
+                struct_name = inst_reg.typ.fqn
+                code.write(f"{inst_reg} {assign} &{struct_name}{{")
+                for i, arg_reg in enumerate(inst.args):
                     if i > 0:
                         code.write(", ")
-                    code.write(f"_{i}: {reg}")
+                    code.write(f"_{i}: {self.reg(arg_reg)}")
                 code.write("}")
                 code.newline()
             case ir.Call():
                 callee = inst.callee
                 if isinstance(callee, str) and callee in map_builtins:
                     callee = map_builtins[callee]
-                if inst.reg != ir.NoneReg:
-                    code.write(f"{inst.reg} := ")
+                if inst_reg != ir.NoneReg:
+                    code.write(f"{inst_reg} {assign} ")
                 code.write(f"{callee}(")
-                code.write(", ".join(f"{arg}" for arg in inst.args) + ")")
-                code.newline()
+                code.writeln(", ".join(f"{self.reg(arg)}" for arg in inst.args) + ")")
             case ir.GetPtr():
-                self.getptrs[inst.reg] = inst
+                self.getptrs[inst_reg] = inst
+                src_reg = self.reg(inst.src)
+                if isinstance(inst.src.typ, ir.Struct):
+                    code.write(f"{inst_reg} {assign} {src_reg}._{inst.field}")
+                else:
+                    code.write(f"{inst_reg} {assign} {src_reg}")
+                if not is_phi_reg:
+                    # todo: This is a hack because we shouldn't emit the code above
+                    #       if the result is used in a `Store` only.
+                    #       `Store` accesses `self.getptrs` because we cannot have
+                    #       pointers to struct fields in Go.
+                    code.write(f"; _ = {inst_reg}")
+                code.newline()
             case ir.IntConst():
-                code.write(f"{inst.reg} := {inst.value}")
-                code.newline()
+                code.writeln(f"{inst_reg} {assign} {inst.value}")
             case ir.Load():
-                # inst.src has to be a GetPtr we have already seen.
-                getptr = self.getptrs[inst.src]
-                code.write(f"{inst.reg} := {getptr.src.id}._{getptr.field}")
-                code.newline()
+                src_reg = self.reg(inst.src)
+                code.writeln(f"{inst_reg} {assign} {src_reg}")
             case ir.Store():
                 # inst.target has to be a GetPtr we have already seen.
-                getptr = self.getptrs[inst.target]
-                code.write(f"{getptr.src.id}._{getptr.field} = {inst.src}")
-                code.newline()
+                target_reg = self.reg(inst.target)
+                getptr = self.getptrs[target_reg]
+                getptr_src_reg = self.reg(getptr.src)
+                code.writeln(f"{getptr_src_reg}._{getptr.field} = {inst.src}")
+            case ir.Phi():
+                pass
             case _:
                 raise NotImplementedError(f"TODO: {type(inst).__name__} {inst}")
+
+    def block(self, block: ir.Block, code: Code) -> None:
+        if len(self.fun_ir.blocks) > 1:
+            code.writeln(f"case {block.id}:")
+            code.indent()
+        for inst in block.insts:
+            self.inst(inst, code)
+        match block.terminator:
+            case ir.Return():
+                if block.terminator.reg == ir.NoneReg:
+                    code.writeln("return")
+                else:
+                    code.writeln(f"return {block.terminator.reg}")
+            case ir.Branch():
+                code.writeln(f"if {block.terminator.reg} == 1 {{")
+                # todo: optimize if we detect a simple if-else chain and are
+                #       sure that this is not a loop. In that case, we can
+                #       just simply create an `if` statement and generate the blocks.
+                code.indent()
+                code.writeln(f"block = {block.terminator.then_block.id}")
+                code.dedent()
+                code.writeln("} else {")
+                code.indent()
+                code.writeln(f"block = {block.terminator.else_block.id}")
+                code.dedent()
+                code.writeln("}")
+            case ir.Jump():
+                code.writeln(f"block = {block.terminator.target.id}")
+            case _:
+                raise NotImplementedError(f"TODO: {type(block.terminator).__name__} {block.terminator}")
+        if len(self.fun_ir.blocks) > 1:
+            code.dedent()
+
+    def handle_phi_nodes(self, code: Code) -> None:
+        for block in self.fun_ir.blocks:
+            for inst in block.insts:
+                if isinstance(inst, ir.Phi):
+                    code.writeln(f"var {inst.reg} {typ(inst.reg.typ)}")
+                    for phi_in in inst.incoming:
+                        self.reg_map[phi_in.reg] = inst.reg
 
     def generate(self) -> str:
         code = Code(0, [])
@@ -105,29 +174,30 @@ class FuncGen:
         code.write(", ".join(f"{param.reg} {typ(param.typ)}" for param in self.fun_ir.params) + ") ")
         if not isinstance(self.fun_ir.result, ir.NoneTyp):
             code.write(f"{typ(self.fun_ir.result)} ")
-        code.write("{")
-        code.newline()
+        code.writeln("{")
         code.indent()
+        self.handle_phi_nodes(code)
+        if len(self.fun_ir.blocks) > 1:
+            code.writeln(f"block := {self.fun_ir.blocks[0].id}")
+            code.writeln("for {")
+            code.indent()
+            code.writeln("switch block {")
         for block in self.fun_ir.blocks:
-            for inst in block.insts:
-                self.inst(inst, code)
-            if isinstance(block.terminator, ir.Return) and block.terminator.reg != ir.NoneReg:
-                code.write(f"return {block.terminator.reg}")
-                code.newline()
+            self.block(block, code)
+        if len(self.fun_ir.blocks) > 1:
+            code.dedent()
+            code.writeln("}}")
         code.dedent()
-        code.write("}")
-        code.newline()
+        code.writeln("}")
         return str(code)
 
 
 def gogen(ir_: ir.IR) -> str:
     code = Code(0, [])
-    code.write("package main")
-    code.newline()
+    code.writeln("package main")
     code.newline()
     for const in ir_.constant_pool.values():
-        code.write(f"var {const.reg} = {json.dumps(const.value)}")
-        code.newline()
+        code.writeln(f"var {const.reg} = {json.dumps(const.value)}")
     if ir_.constant_pool:
         code.newline()
     for struct in ir_.structs.values():
@@ -140,8 +210,7 @@ def gogen(ir_: ir.IR) -> str:
                 code.write(f"*{typ(field)}")
             else:
                 code.write(typ(field))
-        code.write("}")
-        code.newline()
+        code.writeln("}")
     if ir_.structs:
         code.newline()
     for fun_ir in ir_.fn_irs:

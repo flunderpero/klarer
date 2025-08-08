@@ -6,6 +6,7 @@ from enum import Enum
 from typing import TYPE_CHECKING
 
 from . import ast, types
+from .span import log
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -267,7 +268,7 @@ class Phi:
 
 Inst = IntConst | GetPtr | GetFnPtr | Load | Store | Call | Alloc | IAddO | ISubO | ICmp | Phi
 
-BlockId = str
+BlockId = int
 
 
 @dataclass
@@ -464,7 +465,7 @@ class FunGen:
 
     def new_block(self) -> Block:
         self.next_block += 1
-        res = Block(id=f"block_{self.next_block}", insts=[], terminator=None)
+        res = Block(id=self.next_block, insts=[], terminator=None)
         self.fun_ir.blocks.append(res)
         return res
 
@@ -535,7 +536,7 @@ class FunGen:
                         reg = self.node_regs[node.nodes[-1].id]
                     self.node_regs[node.id] = reg
             case ast.Loop():
-                scope_snapshot = self.scope.snapshot()
+                enter_scope_snapshot = self.scope.snapshot()
                 loop_block = self.new_block()
                 break_block = self.new_block()
                 self.loop_scopes.append(LoopScope(loop_block, break_block))
@@ -545,94 +546,99 @@ class FunGen:
                 self.generate(node.block, node)
                 body_scope_snapshot = self.scope.snapshot()
                 # Insert phi nodes for every variable that has been changed in the loop body.
-                for name, prev_reg in scope_snapshot.items():
+                for name, enter_reg in enter_scope_snapshot.items():
                     loop_reg = body_scope_snapshot[name]
-                    if prev_reg == loop_reg:
+                    if enter_reg == loop_reg:
                         continue
-                    reg = self.reg(prev_reg.typ)
+                    reg = self.reg(enter_reg.typ)
                     self.scope.update(name, reg)
-                    self.emit(Phi(reg, [PhiIn(prev_reg, prev_block), PhiIn(loop_reg, loop_block)]), None)
+                    self.emit(Phi(reg, [PhiIn(enter_reg, prev_block), PhiIn(loop_reg, loop_block)]), None)
                 self.block.terminator = Jump(loop_block)
                 self.block = break_block
                 self.loop_scopes.pop()
                 self.node_regs[node.id] = NoneReg
             case ast.If():
-                self.generate(node.cond, node)
-                prev_block = self.block
-                cond_reg = self.node_regs[node.cond.id]
-                then_block = self.new_block()
+                log("ir-trace", f">>> if {node.span} ({len(node.arms)} arms, else: {node.else_block is not None})")
+                # Remember the current scope so we can emit phi nodes for every variable that
+                # escapes the `if` arms or every mutable variable accessed.
                 scope_copy = self.scope.deep_copy()
-                scope_snapshot = self.scope.snapshot()
-                # Walk the `then_block`.
-                self.block = then_block
-                self.generate(node.then_block, node)
-                then_scope_snapshot = self.scope.snapshot()
-                if not node.else_block:
-                    # Reset the scope.
-                    self.scope = scope_copy
-                    merge_block = self.new_block()
-                    # End the then-branch by jumping to the merge-block.
-                    if not self.block.terminator:
-                        self.block.terminator = Jump(merge_block)
-                    # There is no `else_block` so the result of the if expression is None.
-                    self.node_regs[node.id] = NoneReg
-                    prev_block.terminator = Branch(cond_reg, then_block, merge_block)
-                    self.block = merge_block
-                    # Insert phi nodes for every variable that has been changed in the then-branch.
-                    for name, prev_reg in scope_snapshot.items():
-                        then_reg = then_scope_snapshot[name]
-                        if prev_reg == then_reg:
-                            continue
-                        reg = self.reg(prev_reg.typ)
-                        self.scope.update(name, reg)
-                        self.emit(Phi(reg, [PhiIn(prev_reg, prev_block), PhiIn(then_reg, then_block)]), None)
-                else:
-                    # Reset the scope.
-                    self.scope = scope_copy
-                    else_block = self.new_block()
-                    merge_block = self.new_block()
-                    # End the then-branch by jumping to the merge-block.
-                    if not self.block.terminator:
-                        self.block.terminator = Jump(merge_block)
-                    # Walk the `else_block`.
-                    prev_block.terminator = Branch(cond_reg, then_block, else_block)
-                    self.block = else_block
-                    self.generate(node.else_block, node)
-                    else_scope_snapshot = self.scope.snapshot()
-                    assert not self.block.terminator
-                    self.block.terminator = Jump(merge_block)
-                    self.block = merge_block
-                    # Insert a phi node to signal that the result of the if expression is based
-                    # on the branch taken if it is not none.
-                    then_reg = self.node_regs[node.then_block.id]
-                    else_reg = self.node_regs[node.else_block.id]
-                    if NoneReg not in (then_reg, else_reg):
-                        reg = self.reg(self.typ(self.type_env.get(node)))
-                        self.emit(Phi(reg, [PhiIn(then_reg, then_block), PhiIn(else_reg, else_block)]), node)
+                enter_scope_snapshot = self.scope.snapshot()
+                enter_block = self.block
+
+                # Add the else block to the list of arms to make the loop easier.
+                arms: list[tuple[ast.Expr | None, ast.Block, ast.Node]] = [(x.cond, x.block, x) for x in node.arms]
+                if node.else_block is not None:
+                    arms.append((None, node.else_block, node.else_block))
+                # Remember all the "then" blocks so we can set their terminators later.
+                then_blocks = []
+                next_block = None
+                prev_block = self.block
+                scope_snapshots = []
+                for cond, block, arm_node in arms:
+                    if cond is not None:
+                        self.generate(cond, arm_node)
+                        then_block = self.new_block()
                     else:
-                        self.node_regs[node.id] = NoneReg
-                    # Reset the scope again.
-                    self.scope = scope_copy
-                    # Insert phi nodes for every variable that has been changed in either branches.
-                    for name, prev_reg in scope_snapshot.items():
-                        then_reg = then_scope_snapshot[name]
-                        else_reg = else_scope_snapshot[name]
-                        if prev_reg == then_reg and prev_reg == else_reg:
-                            continue
-                        reg = self.reg(prev_reg.typ)
-                        if prev_reg not in (then_reg, else_reg):
-                            self.emit(Phi(reg, [PhiIn(then_reg, then_block), PhiIn(else_reg, else_block)]), None)
-                        elif prev_reg != then_reg:
-                            self.emit(Phi(reg, [PhiIn(prev_reg, prev_block), PhiIn(then_reg, then_block)]), None)
+                        then_block = prev_block
+                    self.block = then_block
+                    then_blocks.append(then_block)
+
+                    # Restore the scope, generate the arm block, and take a snapshot of the scope.
+                    self.scope = scope_copy.deep_copy()
+                    self.generate(block, arm_node)
+                    scope_snapshots.append(self.scope.snapshot())
+
+                    # Create a new block that will take the condition of the next arm.
+                    next_block = self.new_block()
+                    self.block = next_block
+                    if prev_block is not None:
+                        if cond is None:
+                            prev_block.terminator = Jump(next_block)
                         else:
-                            self.emit(Phi(reg, [PhiIn(prev_reg, prev_block), PhiIn(else_reg, else_block)]), None)
+                            prev_block.terminator = Branch(self.node_regs[cond.id], then_block, next_block)
+                    prev_block = next_block
+
+                assert next_block is not None
+
+                # Set the terminator of all the "then" blocks.
+                for then_block in then_blocks:
+                    then_block.terminator = Jump(next_block)
+
+                # Restore the scope.
+                self.scope = scope_copy
+
+                # Insert phi nodes for every change of a mutable variable or new variable.
+                for name, enter_reg in enter_scope_snapshot.items():
+                    regs = [x[name] for x in scope_snapshots]
+                    phis = []
+                    for reg, block in zip(regs, then_blocks):
+                        if reg == enter_reg:
+                            continue
+                        phis.append(PhiIn(reg, block))
+                    if phis:
+                        phis.append(PhiIn(enter_reg, enter_block))
+                        reg = self.reg(enter_reg.typ)
+                        self.scope.update(name, reg)
+                        self.emit(Phi(reg, phis), None)
+
+                # Insert another phi node for the result of the whole if expression.
+                types_typ = self.type_env.get(node)
+                if not types_typ.is_unit():
+                    reg = self.reg(self.typ(types_typ))
+                    phis = []
+                    for block in then_blocks:
+                        phis.append(PhiIn(reg, block))
+                    self.emit(Phi(reg, phis), node)
+                else:
+                    self.node_regs[node.id] = NoneReg
+                log("ir-trace", f"<<< if {node.span}")
             case ast.StrLit():
                 const = self.ir.constant_pool.get(node.value)
                 if not const:
                     reg = Reg(f"s{len(self.ir.constant_pool)}", Str())
                     const = StrConst(reg, node.value)
                     self.ir.constant_pool[node.value] = const
-                self.node_regs[node.id] = const.reg
+                self.emit(GetPtr(reg=self.reg(Str()), src=const.reg), node)
             case ast.CharLit():
                 reg = self.reg(Char)
                 self.emit(IntConst(reg, value=ord(node.value)), node)
@@ -719,7 +725,6 @@ class FunGen:
                         else:
                             self.scope.update(src.name, self.node_regs[node.value.id])
                     case ast.Member():
-                        print("aaa", src)
                         reg = self.node_regs[src.id]
                         value_reg = self.node_regs[node.value.id]
                         self.emit(Store(reg, value_reg), node)

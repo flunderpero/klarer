@@ -213,15 +213,25 @@ class Call:
 @dataclass
 class If:
     id: NodeId
-    cond: Expr
-    then_block: Block
+    arms: list[IfArm]
     else_block: Block | None
     span: Span
 
     def __str__(self) -> str:
-        if self.else_block:
-            return nid(self.id) + f"if {self.cond} {self.then_block} else {self.else_block}"
-        return nid(self.id) + f"if {self.cond} {self.then_block}"
+        arms = "\n".join(str(x) for x in self.arms)
+        else_ = " else do " + str(self.else_block) if self.else_block else ""
+        return nid(self.id) + f"if {arms}{else_} end"
+
+
+@dataclass
+class IfArm:
+    id: NodeId
+    cond: Expr
+    block: Block
+    span: Span
+
+    def __str__(self) -> str:
+        return nid(self.id) + f"case {self.cond} do {self.block}"
 
 
 @dataclass
@@ -302,7 +312,7 @@ class Module:
 
 Shape = ShapeRef | FunShape | ProductShape | ProductShapeComp | SumShape
 Expr = BinaryExpr | Block | BoolLit | Call | CharLit | If | IntLit | Member | Name | StrLit | ShapeLit
-Node = Assign | Expr | FunDef | Module | Loop | Shape | Attr | ShapeDecl | ShapeLitAttr
+Node = Assign | Expr | FunDef | Module | Loop | Shape | Attr | ShapeDecl | ShapeLitAttr | IfArm
 
 ASTVisitor = Callable[[Node, Node | None], Node]
 
@@ -335,10 +345,13 @@ def walk(node: Node, visit_: ASTVisitor) -> bool:
             node.lhs = cast(Expr, visit(node.lhs, node))
             node.rhs = cast(Expr, visit(node.rhs, node))
         case If():
-            node.cond = cast(Expr, visit(node.cond, node))
-            node.then_block = cast(Block, visit(node.then_block, node))
+            for i, arm in enumerate(node.arms):
+                node.arms[i] = cast(IfArm, visit(arm, node))
             if node.else_block:
                 node.else_block = cast(Block, visit(node.else_block, node))
+        case IfArm():
+            node.cond = cast(Expr, visit(node.cond, node))
+            node.block = cast(Block, visit(node.block, node))
         case Loop():
             node.block = cast(Block, visit(node.block, node))
         case Assign():

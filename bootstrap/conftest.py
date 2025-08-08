@@ -91,6 +91,8 @@ def node(kind: Callable, **kwargs: Any) -> ast.Node:
             defaults.update({"mut": False})
         case ast.FunDef:
             defaults.update({"namespace": None})
+        case ast.If:
+            defaults.update({"else_block": None})
         case ast.Name:
             defaults.update({"kind": "ident"})
         case ast.ShapeLit:

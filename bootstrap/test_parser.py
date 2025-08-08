@@ -178,6 +178,39 @@ def test_member() -> None:
     assert parse_first("foo.bar") == node(ast.Member, target=node(ast.Name, name="foo"), name="bar")
 
 
+def test_if() -> None:
+    assert parse_first("if case true do end") == node(
+        ast.If, arms=[node(ast.IfArm, cond=node(ast.BoolLit, value=True), block=node(ast.Block, nodes=[]))]
+    )
+    assert parse_first(
+        """
+        if
+            case true do
+                1
+            case false do
+                2
+            else do
+                3
+        end
+        """
+    ) == node(
+        ast.If,
+        arms=[
+            node(
+                ast.IfArm,
+                cond=node(ast.BoolLit, value=True),
+                block=node(ast.Block, nodes=[node(ast.IntLit, value=1)]),
+            ),
+            node(
+                ast.IfArm,
+                cond=node(ast.BoolLit, value=False),
+                block=node(ast.Block, nodes=[node(ast.IntLit, value=2)]),
+            ),
+        ],
+        else_block=node(ast.Block, nodes=[node(ast.IntLit, value=3)]),
+    )
+
+
 def test_call() -> None:
     assert parse_first("foo()") == node(ast.Call, callee=node(ast.Name, name="foo"), args=[])
     assert parse_first("foo(42)") == node(

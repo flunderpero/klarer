@@ -92,7 +92,7 @@ def run_test(case: Case, print_code: str) -> list:
                         print(step)
                         return []
                     if step.duration > 0.1:
-                        print(f" [asm:{step.duration * 1000:.0f}]", end="", flush=True)
+                        print(f" [code:{step.duration * 1000:.0f}]", end="", flush=True)
                 case compiler.CompileStep():
                     if step.returncode != 0:
                         return [f"Compilation (Go) failed with code {step.returncode}\n{step.stdout}\n{step.stderr}"]
@@ -151,7 +151,7 @@ def find_tests(src: str, chapter: str) -> list[Case]:
                             break
                         code.append(line)
                     code_str = "\n".join(code)
-                    if lines[i].strip() == "" and lines[i + 1].strip() == "```":
+                    if lines[i].strip() == "" and len(lines) > i + 1 and lines[i + 1].strip() == "```":
                         i += 2
                         while i < len(lines):
                             line = lines[i]

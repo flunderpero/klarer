@@ -1,2 +1,3 @@
+[positional-arguments]
 bootstrap *args:
-    @just --justfile bootstrap/justfile "{{args}}"
+    @just --justfile bootstrap/justfile "$@"

@@ -97,3 +97,92 @@ end
 ```
 a
 ```
+
+### If Expressions
+
+```klarer
+main = fun() do
+    if case true do
+        print("PASS")
+    end
+end
+```
+
+```
+PASS
+```
+
+**Multiple cases and else**
+
+```klarer
+main = fun() do
+    print("middle one is taken:")
+    if
+        case false do print("FAIL")
+        case true do print("PASS")
+        else do print("FAIL")
+    end
+
+    print("else is taken:")
+    if
+        case false do print("FAIL")
+        case false do print("FAIL")
+        else do print("PASS")
+    end
+end
+```
+
+```
+middle one is taken:
+PASS
+else is taken:
+PASS
+```
+
+**Mutating variables that are defined outside the if**
+
+```klarer
+main = fun() do
+    mut pass = "FAIL"
+    mut num = 42
+
+    if
+        case false do
+            pass = "FAIL!"
+            num = 0
+        case true do
+            pass = "PASS"
+        else do
+            pass = "FAIL!!"
+            num = 137
+    end
+
+    print(pass)
+    print(int_to_str(num))
+end
+```
+
+```
+PASS
+42
+```
+
+**Capturing the result of an if expression**
+
+```klarer
+main = fun() do
+    s = if
+        case false do "FAIL"
+        case true do "PASS"
+    end
+    print(s)
+end
+```
+
+**At least one if case**
+
+```klarer
+main = fun() do
+    if else do end -- ERROR: Expected `case`, got `else`
+end
+```

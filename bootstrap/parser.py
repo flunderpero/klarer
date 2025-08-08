@@ -278,7 +278,7 @@ class Parser:
                     return None
         if not self.expect(token.Kind.paren_right):
             return None
-        body = self.parse_block()
+        body, _ = self.parse_block()
         if not body:
             return None
         return ast.FunDef(self.id(), name, namespace, params, body, self.input.span_merge(span))
@@ -287,25 +287,39 @@ class Parser:
         span = self.input.span()
         if not self.expect(token.Kind.if_):
             return None
-        cond = self.parse_expr()
-        if not cond:
+        arms: list[ast.IfArm] = []
+        else_block = None
+        arm_token = self.expect(token.Kind.case)
+        if not arm_token:
             return None
-        then_block = self.parse_block()
-        if not then_block:
-            return None
-        else_block: ast.Block | None = None
-        if self.input.peek().kind == token.Kind.else_:
-            self.input.next()
-            else_block = self.parse_block()
-            if not else_block:
+        while self.input.peek().kind != token.Kind.eof:
+            cond = self.parse_expr()
+            if not cond:
                 return None
-        return ast.If(self.id(), cond, then_block, else_block, self.input.span_merge(span))
+            block, end = self.parse_block((token.Kind.end, token.Kind.else_, token.Kind.case))
+            if not block:
+                return None
+            arms.append(ast.IfArm(self.id(), cond, block, self.input.span_merge(arm_token.span)))
+            assert end is not None
+            match end.kind:
+                case token.Kind.end:
+                    break
+                case token.Kind.else_:
+                    else_block, _ = self.parse_block()
+                    if not else_block:
+                        return None
+                    break
+                case token.Kind.case:
+                    arm_token = end
+                case _:
+                    raise AssertionError(f"Unexpected token kind: {end.kind}")
+        return ast.If(self.id(), arms, else_block, self.input.span_merge(span))
 
     def parse_loop(self) -> ast.Loop | None:
         span = self.input.span()
         if not self.expect(token.Kind.loop):
             return None
-        block = self.parse_block()
+        block, _ = self.parse_block()
         if not block:
             return None
         return ast.Loop(self.id(), block, self.input.span_merge(span))
@@ -347,7 +361,7 @@ class Parser:
         expr: ast.Expr | None
         match t.kind:
             case token.Kind.do:
-                return self.parse_block()
+                return self.parse_block()[0]
             case token.Kind.ident:
                 expr = self.parse_name(t.kind)
             case token.Kind.str_lit:
@@ -446,18 +460,21 @@ class Parser:
             return None
         return ast.Call(self.id(), callee, args, self.input.span_merge(span))
 
-    def parse_block(self) -> ast.Block | None:
+    def parse_block(
+        self, expected_end: tuple[token.Kind, ...] = (token.Kind.end,)
+    ) -> tuple[ast.Block | None, token.Token | None]:
         span = self.input.span()
-        self.expect(token.Kind.do)
+        if not self.expect(token.Kind.do):
+            return (None, None)
         nodes: list[ast.Node] = []
         while (t := self.input.peek()).kind != token.Kind.eof:
-            if t.kind == token.Kind.end:
+            if t.kind in expected_end:
                 self.input.next()
                 break
             node = self.parse_block_node()
             if node:
                 nodes.append(node)
-        return ast.Block(self.id(), nodes, self.input.span_merge(span))
+        return (ast.Block(self.id(), nodes, self.input.span_merge(span)), t)
 
     def parse_assign(self, target: ast.Expr | None = None, *, mut: bool = False) -> ast.Assign | None:
         span = self.input.span()

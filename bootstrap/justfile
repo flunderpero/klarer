@@ -19,7 +19,8 @@ lint *args:
 test: test-pytest test-md
 
 test-pytest *args:
-    pytest . {{args}}
+    # Exclude `test_md.py` because we run it in `test-md`.
+    pytest . {{args}} --ignore=test_md.py
 
 [positional-arguments]
 test-md *args:

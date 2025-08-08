@@ -108,6 +108,10 @@ def unexpected_token(span: Span, got: str, *expected: str) -> Error:
     return SimpleError(span, f"{prefix}{expected_names}, got `{got}`", _stack())
 
 
+def expected_at_least_one_if_case(span: Span) -> Error:
+    return SimpleError(span, "Expected at least one if case", _stack())
+
+
 def expected_assignment(got: str, span: Span) -> Error:
     return SimpleError(span, f"Expected an assignment but got `{got}`", _stack())
 

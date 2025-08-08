@@ -324,6 +324,21 @@ class Scope:
             mut=False,
             builtin=True,
         )
+        scope.bindings["int_to_str"] = Binding(
+            Typ(Fun("int_to_str", (Attr("i", IntTyp),), StrTyp, span=span, builtin=True)),
+            mut=False,
+            builtin=True,
+        )
+        scope.bindings["char_to_str"] = Binding(
+            Typ(Fun("char_to_str", (Attr("c", CharTyp),), StrTyp, span=span, builtin=True)),
+            mut=False,
+            builtin=True,
+        )
+        scope.bindings["bool_to_str"] = Binding(
+            Typ(Fun("bool_to_str", (Attr("b", BoolTyp),), StrTyp, span=span, builtin=True)),
+            mut=False,
+            builtin=True,
+        )
         scope.bindings["Int"] = Binding(IntTyp, mut=False, builtin=True)
         scope.bindings["Str"] = Binding(StrTyp, mut=False, builtin=True)
         scope.bindings["Bool"] = Binding(BoolTyp, mut=False, builtin=True)

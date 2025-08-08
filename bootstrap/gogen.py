@@ -7,6 +7,9 @@ from . import ir
 
 map_builtins = {
     "print": "Print",
+    "int_to_str": "IntToStr",
+    "bool_to_str": "BoolToStr",
+    "char_to_str": "CharToStr",
 }
 
 

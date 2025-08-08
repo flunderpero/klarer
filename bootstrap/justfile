@@ -6,14 +6,22 @@ precommit:
 format:
     @echo "Formatting ..."
     ruff format
-    # npx prettier -w *.md ../*.md
+    npx prettier -w *.md ../*.md
 
 lint *args:
     @echo "Linting ..."
     pyright
     ruff check {{args}}
+    @echo "Checking for test exclusions in TEST.md ..."
+    @grep '!only' TEST.md && exit 1 || true
+    @grep '!skip' TEST.md && exit 1 || true
 
-test: test-pytest
+test: test-pytest test-md
 
 test-pytest *args:
     pytest . {{args}}
+
+[positional-arguments]
+test-md *args:
+    @cd .. && python3 -m bootstrap.test_md bootstrap/TEST.md -- "$@"
+

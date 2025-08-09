@@ -551,9 +551,9 @@ class TypeCheck:
         with self.child_scope(node):
             for param in node.params:
                 param_typ = Typ(None)
-                if err := self.scope.bind(param, param_typ, mut=False):
+                if err := self.scope.bind(param.name, param_typ, mut=False):
                     return self.error(err)
-                params.append(Attr(param, param_typ))
+                params.append(Attr(param.name, param_typ))
             ast.walk(node, self.visit)
         return_typ = self.type_env.get(node.body)
         typ = Typ(Fun(node.name, (*params,), return_typ, node.span, builtin=False))
@@ -568,6 +568,19 @@ class TypeCheck:
                 return self.error(error.invalid_main(node.span))
             self.fun_specs[fun] = [FunSpec(self.type_env, node, fun, fun)]
         return typ
+
+    def tc_fun_def_specialized(self, node: ast.FunDef, fun: Fun) -> Typ:
+        with self.child_scope(node):
+            for param in fun.params:
+                if err := self.scope.bind(param.name, param.typ, mut=False):
+                    return self.error(err)
+            ast.walk(node, self.visit)
+        return_typ = self.type_env.get(node.body)
+        fun = replace(fun, result=return_typ)
+        return Typ(fun)
+
+    def tc_fun_param(self, _node: ast.FunParam) -> Typ:
+        return Typ(None)
 
     def tc_if(self, node: ast.If) -> Typ:
         ast.walk(node, self.visit)
@@ -600,16 +613,6 @@ class TypeCheck:
         if not attr:
             return self.error(error.no_member(node.name, str(shape), node.target.span, node.span))
         return attr.typ
-
-    def tc_fun_def_specialized(self, node: ast.FunDef, fun: Fun) -> Typ:
-        with self.child_scope(node):
-            for param in fun.params:
-                if err := self.scope.bind(param.name, param.typ, mut=False):
-                    return self.error(err)
-            ast.walk(node, self.visit)
-        return_typ = self.type_env.get(node.body)
-        fun = replace(fun, result=return_typ)
-        return Typ(fun)
 
     def tc_module(self, node: ast.Module) -> Typ:
         ast.walk(node, self.visit)
@@ -691,6 +694,8 @@ class TypeCheck:
                 typ = CharTyp
             case ast.FunDef():
                 typ = self.tc_fun_def(node)
+            case ast.FunParam():
+                typ = self.tc_fun_param(node)
             case ast.If():
                 typ = self.tc_if(node)
             case ast.IfArm():

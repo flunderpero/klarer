@@ -260,14 +260,14 @@ class Parser:
     def parse_fun_def(self, name: str, span: Span, namespace: str | None = None) -> ast.FunDef | None:
         if not self.expect(token.Kind.fun):
             return None
-        params: list[str] = []
+        params: list[ast.FunParam] = []
         if not self.expect(token.Kind.paren_left):
             return None
         while self.input.peek().kind != token.Kind.paren_right:
-            param_name = self.expect_ident()
+            param_name = self.expect(token.Kind.ident)
             if not param_name:
                 return None
-            params.append(param_name)
+            params.append(ast.FunParam(self.id(), param_name.value_str(), param_name.span))
             match self.input.peek().kind:
                 case token.Kind.comma:
                     self.input.next()

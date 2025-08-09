@@ -286,11 +286,21 @@ class Attr:
 
 
 @dataclass
+class FunParam:
+    id: NodeId
+    name: str
+    span: Span
+
+    def __str__(self) -> str:
+        return nid(self.id) + self.name
+
+
+@dataclass
 class FunDef:
     id: NodeId
     name: str
     namespace: str | None
-    params: list[str]
+    params: list[FunParam]
     body: Block
     span: Span
 
@@ -312,7 +322,7 @@ class Module:
 
 Shape = ShapeRef | FunShape | ProductShape | ProductShapeComp | SumShape
 Expr = BinaryExpr | Block | BoolLit | Call | CharLit | If | IntLit | Member | Name | StrLit | ShapeLit
-Node = Assign | Expr | FunDef | Module | Loop | Shape | Attr | ShapeDecl | ShapeLitAttr | IfArm
+Node = Assign | Expr | FunDef | Module | Loop | Shape | Attr | ShapeDecl | ShapeLitAttr | IfArm | FunParam
 
 ASTVisitor = Callable[[Node, Node | None], Node]
 
@@ -336,6 +346,8 @@ def walk(node: Node, visit_: ASTVisitor) -> bool:
             for i, n in enumerate(node.nodes):
                 node.nodes[i] = visit(n, node)
         case FunDef():
+            for i, param in enumerate(node.params):
+                node.params[i] = cast(FunParam, visit(param, node))
             node.body = cast(Block, visit(node.body, node))
         case Call():
             node.callee = cast(Expr, visit(node.callee, node))
@@ -383,7 +395,7 @@ def walk(node: Node, visit_: ASTVisitor) -> bool:
             for i, param in enumerate(node.params):
                 node.params[i] = cast(Attr, visit(param, node))
             node.result = cast(Shape, visit(node.result, node))
-        case Name() | IntLit() | CharLit() | StrLit() | BoolLit() | ShapeRef():
+        case Name() | IntLit() | CharLit() | StrLit() | BoolLit() | ShapeRef() | FunParam():
             return False
         case _:
             raise AssertionError(f"Don't know how to walk: {node}")

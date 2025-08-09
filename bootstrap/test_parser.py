@@ -35,13 +35,20 @@ def test_mut_assign() -> None:
 
 def test_fun_def() -> None:
     assert parse_first("foo = fun(a, b) do end") == node(
-        ast.FunDef, name="foo", params=["a", "b"], body=node(ast.Block, nodes=[])
+        ast.FunDef,
+        name="foo",
+        params=[node(ast.FunParam, name="a"), node(ast.FunParam, name="b")],
+        body=node(ast.Block, nodes=[]),
     )
 
 
 def test_fun_def_with_behaviour_ns() -> None:
     assert parse_first("@Foo.bar = fun(a, b) do end") == node(
-        ast.FunDef, name="bar", namespace="Foo", params=["a", "b"], body=node(ast.Block, nodes=[])
+        ast.FunDef,
+        name="bar",
+        namespace="Foo",
+        params=[node(ast.FunParam, name="a"), node(ast.FunParam, name="b")],
+        body=node(ast.Block, nodes=[]),
     )
 
 

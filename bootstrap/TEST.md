@@ -190,3 +190,50 @@ main = fun() do
     if else do end -- ERROR: Expected `case`, got `else`
 end
 ```
+
+## Mutability
+
+### Mutable Variables
+
+```klarer
+main = fun() do
+    mut s = "FAIL"
+    s = "PASS"
+    print(s)
+end
+```
+
+```
+PASS
+```
+
+**Mutable variables must be marked with `mut`**
+
+```klarer
+main = fun() do
+    s = "FAIL"
+    s = "PASS" -- ERROR: `s` is not mutable
+end
+```
+
+### Mutable Function Parameters
+
+> [!TODO]
+> We need to actually mark the function parameter as mutable.
+> For now, all non-primitive parameters are just mutable.
+
+```klarer
+f = fun(v) do
+    v.value = "PASS"
+end
+
+main = fun() do
+    mut v = {value = "FAIL"}
+    f(v)
+    print(v.value)
+end
+```
+
+```
+PASS
+```

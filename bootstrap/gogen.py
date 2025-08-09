@@ -171,7 +171,11 @@ class FuncGen:
     def generate(self) -> str:
         code = Code(0, [])
         code.write(f"func {self.fun_ir.fn_name}(")
-        code.write(", ".join(f"{param.reg} {typ(param.typ)}" for param in self.fun_ir.params) + ") ")
+        for param in self.fun_ir.params:
+            ref = "*" if isinstance(param.typ, ir.Struct) else ""
+            code.write(f"{param.reg} {ref}{typ(param.typ)}")
+            code.write(", ")
+        code.write(") ")
         if not isinstance(self.fun_ir.result, ir.NoneTyp):
             code.write(f"{typ(self.fun_ir.result)} ")
         code.writeln("{")

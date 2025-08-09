@@ -217,8 +217,6 @@ def main(args: list[str]) -> int:
     src = open(file).read()
     tests = find_tests(src, "" if len(args) == 2 else args[2])
     tests = filter_tests(tests)
-    # print("aaa", "\n".join([x.name() for x in tests]))
-    # return 0
     if len(args) > 3:
         test_num = int(args[3]) - 1
         tests = tests[test_num : test_num + 1]
@@ -248,7 +246,7 @@ def main(args: list[str]) -> int:
 
 
 def test_default() -> None:
-    assert main(["md_tests.py", "TEST.md"]) == 0
+    assert main(["md_tests.py", "TEST.md", "--err-stack"]) == 0
 
 
 if __name__ == "__main__":

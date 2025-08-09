@@ -8,7 +8,7 @@ if TYPE_CHECKING:
     from .span import Span
 
 
-@dataclass
+@dataclass(unsafe_hash=True)
 class SimpleError:
     span: Span
     message: str
@@ -22,7 +22,7 @@ class SimpleError:
         return self.message
 
 
-@dataclass
+@dataclass(unsafe_hash=True)
 class DuplicateError:
     name: str
     span: Span
@@ -38,7 +38,7 @@ class DuplicateError:
         return f"Duplicate `{self.name}`"
 
 
-@dataclass
+@dataclass(unsafe_hash=True)
 class WithDefinitionError:
     span: Span
     message: str
@@ -57,20 +57,17 @@ class WithDefinitionError:
         return self.message
 
 
-@dataclass
+@dataclass(unsafe_hash=True)
 class CascadedError:
     span: Span
-    origin_message: str
-    originated_here: Span
+    cause: Error
     stacktrace: str
 
     def __str__(self) -> str:
-        code = "\n".join(self.span.formatted_lines())
-        origin_code = "\n".join(self.originated_here.formatted_lines())
-        return f"{self.span}: {self.origin_message}\n{code}\nOriginated here:\n{origin_code}"
+        return f"{self.span}: {self.cause}"
 
     def short_message(self) -> str:
-        return self.origin_message
+        return f"Cascaded error: {self.cause.short_message()}"
 
 
 Error = SimpleError | WithDefinitionError | DuplicateError | CascadedError
@@ -140,8 +137,8 @@ def unexpected_type(expected: str, got: str, span: Span) -> Error:
     return SimpleError(span, f"Expected {expected}, got {got}", _stack())
 
 
-def cascaded_error(span: Span, origin_message: str, originated_here: Span) -> Error:
-    return CascadedError(span, origin_message, originated_here, _stack())
+def cascaded_error(cause: Error, span: Span) -> Error:
+    return CascadedError(span, cause, _stack())
 
 
 def wrong_number_of_args(span: Span, params: int, args: int, defined_here: Span) -> Error:

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from . import ast, types
-from .conftest import typ, typecheck, typecheck_err
+from .conftest import empty_shape, typ, typecheck, typecheck_err
 
 
 def test_literals() -> None:
@@ -70,18 +70,77 @@ def test_assign_shape_literal_must_conform() -> None:
 def test_fun() -> None:
     tc = typecheck(""" f = fun() do 42 end """)
     assert tc.type_at(1, 1, ast.FunDef) == types.Typ(
-        types.Fun("f", (), types.IntTyp, types.builtin_span, builtin=False)
+        types.Fun("f", (), types.IntTyp, types.builtin_span, builtin=False), []
     )
     tc = typecheck(""" main = fun() do end """)
     assert tc.type_at(1, 1, ast.FunDef) == types.Typ(
-        types.Fun("main", (), types.UnitTyp, types.builtin_span, builtin=False)
+        types.Fun("main", (), types.UnitTyp, types.builtin_span, builtin=False), []
+    )
+
+
+def test_fun_infer_from_member() -> None:
+    tc = typecheck(
+        """
+            f = fun(a) do
+                a.value
+                a
+            end """
+    )
+    assert tc.type_at(1, 1, ast.FunDef) == typ(
+        types.Fun,
+        name="f",
+        params=(
+            types.Attr(
+                "a",
+                typ(
+                    types.Shape,
+                    attrs=(types.Attr("value", empty_shape()),),
+                ),
+            ),
+        ),
+        result=typ(
+            types.Shape,
+            attrs=(
+                types.Attr(
+                    "value",
+                    empty_shape(),
+                ),
+            ),
+        ),
     )
 
 
 def test_fun_infer_from_binop() -> None:
     tc = typecheck(""" f = fun(a) do a == 42 end """)
     assert tc.type_at(1, 1, ast.FunDef) == types.Typ(
-        types.Fun("f", (types.Attr("a", types.IntTyp),), types.BoolTyp, types.builtin_span, builtin=False)
+        types.Fun("f", (types.Attr("a", types.IntTyp),), types.BoolTyp, types.builtin_span, builtin=False), []
+    )
+
+
+def test_fun_infer_from_accessing_member_of_shape() -> None:
+    tc = typecheck("""
+        f = fun(a) do
+            a.value
+            a
+        end """)
+    assert tc.type_at(1, 1, ast.FunDef) == typ(
+        types.Fun,
+        name="f",
+        params=(types.Attr("a", typ(types.Shape, attrs=(types.Attr("value", empty_shape()),))),),
+        result=typ(types.Shape, attrs=(types.Attr("value", empty_shape()),)),
+    )
+
+
+def test_fun_infer_from_assign_to_shape_attr() -> None:
+    tc = typecheck("""
+        f = fun(a) do
+            a.value = 42
+        end """)
+    assert tc.type_at(1, 1, ast.FunDef) == typ(
+        types.Fun,
+        name="f",
+        params=(types.Attr("a", typ(types.Shape, attrs=(types.Attr("value", types.IntTyp),))),),
+        result=types.UnitTyp,
     )
 
 

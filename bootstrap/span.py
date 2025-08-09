@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
-LogTopic = Literal["parser-trace", "typechecker-trace", "typechecker-mono", "ir-trace"]
+LogTopic = Literal["parser-trace", "typechecker-trace", "typechecker-mono", "typechecker-infer", "ir-trace"]
 
 log_topics: set[LogTopic] = set()
 
@@ -15,7 +15,7 @@ def log(topic: LogTopic, msg: str, indent: int = 0) -> None:
         print(f"\x1b[1;90m[{topic}]\x1b[0m {indent * '  '}{msg}")
 
 
-@dataclass
+@dataclass(unsafe_hash=True)
 class Span:
     file: str
     src: str

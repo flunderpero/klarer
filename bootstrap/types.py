@@ -3,7 +3,7 @@ from __future__ import annotations
 import inspect
 from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
-from typing import TYPE_CHECKING, Any, Callable, Literal
+from typing import TYPE_CHECKING, Any, Callable, Literal, cast
 
 from . import ast, error
 from .span import Span, log
@@ -83,6 +83,10 @@ class Shape:
     behaviours: tuple[Behaviour, ...]
     span: Span = field(compare=False, hash=False)
 
+    @staticmethod
+    def empty(span: Span) -> Shape:
+        return Shape(None, (), (), (), span)
+
     def is_named(self) -> bool:
         return self.name is not None
 
@@ -118,7 +122,7 @@ class Shape:
         return "_".join(name)
 
     def is_empty(self) -> bool:
-        return not self.attrs and not self.variants
+        return not self.attrs and not self.variants and not self.behaviours
 
     def subsumes(self, other: Typ) -> bool:
         """A shape subsumes the other shape if it has at least all the
@@ -154,6 +158,18 @@ class Shape:
                 return False
 
         return True
+
+    def merge(self, other: Shape) -> Shape:
+        attrs: list[Attr] = []
+        for other_attr in other.attrs:
+            self_attr = self.attr(other_attr.name)
+            if self_attr is not None:
+                t = Typ(self_attr.typ.typ, origin_trail=[*self_attr.typ.origin_trail])
+                t.merge(other_attr.typ)
+                attrs.append(Attr(other_attr.name, t))
+            else:
+                attrs.append(other_attr)
+        return Shape(self.name, tuple(attrs), self.variants, self.behaviours, self.span)
 
 
 @dataclass(eq=True, frozen=True)
@@ -206,57 +222,49 @@ class Fun:
 
 
 @dataclass
-class Typ[T: Primitive | Shape | Fun | error.Error | None]:
+class Typ[T: Primitive | Shape | Fun | error.Error]:
     typ: T
+    origin_trail: list[ast.Node]
 
     def __str__(self) -> str:
         return str(self.typ)
 
     @property
     def span(self) -> Span:
-        if self.typ is None:
-            return Span("<unknown>", "", 0, 0)
         return self.typ.span
 
     def is_error(self) -> bool:
-        return self.typ is not None and isinstance(self.typ, error.Error)
-
-    def is_none(self) -> bool:
-        return self.typ is None
+        return isinstance(self.typ, error.Error)
 
     def is_unit(self) -> bool:
-        return self.typ is not None and isinstance(self.typ, Primitive) and self.typ.name == "Unit"
+        return isinstance(self.typ, Primitive) and self.typ.name == "Unit"
 
     def is_primitive(self) -> bool:
-        return self.typ is not None and isinstance(self.typ, Primitive)
+        return isinstance(self.typ, Primitive)
 
     def is_fun(self) -> bool:
-        return self.typ is not None and isinstance(self.typ, Fun)
+        return isinstance(self.typ, Fun)
+
+    def is_empty_shape(self) -> bool:
+        return isinstance(self.typ, Shape) and self.typ.is_empty()
 
     def subsumes(self, other: Typ) -> bool:
-        if self.typ is None:
-            return other.is_none()
         if isinstance(self.typ, error.Error):
             return False
         return self.typ.subsumes(other.typ)
 
     def merge(self, other: Typ) -> None:
-        if self.is_none():
+        if self.is_empty_shape():
             self.typ = other.typ
-        elif other.is_none():
-            pass
-        # todo: merge more types
+        elif isinstance(self.typ, Shape) and not isinstance(other.typ, Shape):
+            self.typ = cast(T, self.typ.merge(other.typ))
 
     def is_same(self, other: Typ) -> bool:
-        if self.typ is None:
-            return other.typ is None
         if isinstance(self.typ, error.Error):
             return False
         return self.typ.is_same(other.typ)
 
     def mangled_name(self) -> str:
-        if self.typ is None:
-            return "none"
         assert not isinstance(self.typ, error.Error), f"Type {self.typ} must be resolved before mangling"
         return self.typ.mangled_name()
 
@@ -266,17 +274,15 @@ class Typ[T: Primitive | Shape | Fun | error.Error | None]:
         return self.typ == other.typ
 
     def __hash__(self) -> int:
-        if self.typ is None:
-            return 0
         return hash(self.typ)
 
 
 builtin_span = Span("<builtin", "", 0, 0)
-BoolTyp = Typ(Primitive("Bool", (), builtin_span))
-CharTyp = Typ(Primitive("Char", (), builtin_span))
-IntTyp = Typ(Primitive("Int", (), builtin_span))
-StrTyp = Typ(Primitive("Str", (), builtin_span))
-UnitTyp = Typ(Primitive("Unit", (), builtin_span))
+BoolTyp = Typ(Primitive("Bool", (), builtin_span), origin_trail=[])
+CharTyp = Typ(Primitive("Char", (), builtin_span), origin_trail=[])
+IntTyp = Typ(Primitive("Int", (), builtin_span), origin_trail=[])
+StrTyp = Typ(Primitive("Str", (), builtin_span), origin_trail=[])
+UnitTyp = Typ(Primitive("Unit", (), builtin_span), origin_trail=[])
 
 
 @dataclass
@@ -309,6 +315,7 @@ class Binding:
     typ: Typ
     mut: bool
     builtin: bool
+    is_fun_param: bool
 
 
 @dataclass
@@ -321,31 +328,29 @@ class Scope:
     def root() -> Scope:
         """The root scope with all the builtins."""
         span = Span("<builtin>", "", 0, 0)
+        binding_defaults = {"builtin": True, "is_fun_param": False, "mut": False}
+        typ_defaults = {"origin_trail": []}
         scope = Scope(None, None, {})
         scope.bindings["print"] = Binding(
-            Typ(Fun("print", (Attr("s", StrTyp),), UnitTyp, span=span, builtin=True)),
-            mut=False,
-            builtin=True,
+            Typ(Fun("print", (Attr("s", StrTyp),), UnitTyp, span=span, builtin=True), **typ_defaults),
+            **binding_defaults,
         )
         scope.bindings["int_to_str"] = Binding(
-            Typ(Fun("int_to_str", (Attr("i", IntTyp),), StrTyp, span=span, builtin=True)),
-            mut=False,
-            builtin=True,
+            Typ(Fun("int_to_str", (Attr("i", IntTyp),), StrTyp, span=span, builtin=True), **typ_defaults),
+            **binding_defaults,
         )
         scope.bindings["char_to_str"] = Binding(
-            Typ(Fun("char_to_str", (Attr("c", CharTyp),), StrTyp, span=span, builtin=True)),
-            mut=False,
-            builtin=True,
+            Typ(Fun("char_to_str", (Attr("c", CharTyp),), StrTyp, span=span, builtin=True), **typ_defaults),
+            **binding_defaults,
         )
         scope.bindings["bool_to_str"] = Binding(
-            Typ(Fun("bool_to_str", (Attr("b", BoolTyp),), StrTyp, span=span, builtin=True)),
-            mut=False,
-            builtin=True,
+            Typ(Fun("bool_to_str", (Attr("b", BoolTyp),), StrTyp, span=span, builtin=True), **typ_defaults),
+            **binding_defaults,
         )
-        scope.bindings["Int"] = Binding(IntTyp, mut=False, builtin=True)
-        scope.bindings["Str"] = Binding(StrTyp, mut=False, builtin=True)
-        scope.bindings["Bool"] = Binding(BoolTyp, mut=False, builtin=True)
-        scope.bindings["Char"] = Binding(CharTyp, mut=False, builtin=True)
+        scope.bindings["Int"] = Binding(IntTyp, **binding_defaults)
+        scope.bindings["Str"] = Binding(StrTyp, **binding_defaults)
+        scope.bindings["Bool"] = Binding(BoolTyp, **binding_defaults)
+        scope.bindings["Char"] = Binding(CharTyp, **binding_defaults)
         return scope
 
     def lookup(self, name: str) -> Binding | None:
@@ -355,11 +360,27 @@ class Scope:
             return self.parent.lookup(name)
         return None
 
-    def bind(self, name: str, typ: Typ, *, mut: bool) -> error.Error | None:
+    def bind(
+        self, name: str, typ: Typ, *, mut: bool, is_fun_param: bool = False, can_shadow_parent_scopes: bool = False
+    ) -> error.Error | None:
+        """Bind the name to the typ.
+        An error is returned if the name is already bound to a different type.
+
+        If `can_shadow_parent_scopes` is True, the name can be bound even if
+        it is already bound in a parent scope but not in the current scope.
+        """
         existing = self.lookup(name)
-        if existing:
-            return error.duplicate_declaration(name, existing.typ.span, typ.span)
-        self.bindings[name] = Binding(typ, mut, builtin=False)
+        if existing and (not can_shadow_parent_scopes or name in self.bindings):
+            return error.duplicate_declaration(name, typ.span, existing.typ.span)
+        self.bindings[name] = Binding(typ, mut, builtin=False, is_fun_param=is_fun_param)
+        return None
+
+    def inside(self, node_typ: type[ast.Node]) -> ast.Node | None:
+        s = self
+        while s:
+            if isinstance(s.node, node_typ):
+                return s.node
+            s = s.parent
         return None
 
 
@@ -411,7 +432,7 @@ class TypeCheck:
         specs = self.fun_specs.get(fun, [])
         param_types = [self.type_env.get(x) for x in call_args]
         for spec in specs:
-            if spec.base == fun and spec.specialized.params == param_types:
+            if spec.base == fun and [x.typ for x in spec.specialized.params] == param_types:
                 return spec
         return None
 
@@ -424,11 +445,12 @@ class TypeCheck:
             log("typechecker-mono", f">>> Specializing {fun} at call-site {span}", self.nesting_level)
 
             params = (*(Attr(attr.name, self.type_env.get(arg)) for attr, arg in zip(fun.params, call_args)),)
-            specialized = Fun(fun.name, params, Typ(None), fun.span, builtin=fun.builtin)
+            specialized = Fun(
+                fun.name, params, Typ(Shape.empty(fun.span), origin_trail=[]), fun.span, builtin=fun.builtin
+            )
 
             base = self.type_env.get(fun_def)
             spec = FunSpec(self.type_env, fun_def, base.typ, specialized)
-            self.fun_specs.get(fun, []).append(spec)
 
             log(
                 "typechecker-mono",
@@ -436,6 +458,8 @@ class TypeCheck:
                 self.nesting_level,
             )
             typ = self.tc_fun_def_specialized(spec.fun_def, spec.specialized)
+            if typ.is_error():
+                return spec
             spec.specialized = replace(spec.specialized, result=typ.typ.result)
             log(
                 "typechecker-mono",
@@ -467,7 +491,7 @@ class TypeCheck:
 
     def error(self, err: error.Error) -> Typ:
         self.errors.append(err)
-        return Typ(err)
+        return Typ(err, [])
 
     def tc_assign(self, node: ast.Assign) -> Typ:
         self.visit(node.value, None)
@@ -487,7 +511,7 @@ class TypeCheck:
                     self.scope.bind(node.target.name, value, mut=node.mut)
                 self.type_env.set(node.target, value)
             case ast.Member():
-                ast.walk(node.target, self.visit)
+                self.visit(node.target, node)
                 shape = self.type_env.get(node.target.target)
                 if shape.is_error():
                     return shape
@@ -496,6 +520,7 @@ class TypeCheck:
                     return self.error(
                         error.no_member(node.target.name, str(shape), node.target.span, node.target.target.span)
                     )
+                self.merge_fun_param(shape, value)
                 if not attr.typ.is_same(value):
                     return self.error(error.not_assignable_from(node.target.span, str(attr.typ), str(value)))
             case _:
@@ -507,7 +532,7 @@ class TypeCheck:
         typ = self.type_env.get(node.shape)
         if typ.is_error():
             return typ
-        return Typ(Shape(None, (Attr(node.name, typ),), (), (), node.span))
+        return Typ(Shape(None, (Attr(node.name, typ),), (), (), node.span), origin_trail=[node, node.shape])
 
     def tc_binary_expr(self, node: ast.BinaryExpr) -> Typ:
         ast.walk(node, self.visit)
@@ -518,8 +543,8 @@ class TypeCheck:
         if rhs.is_error():
             return rhs
         # We can directly merge the types of the two operands.
-        lhs.merge(rhs)
-        rhs.merge(lhs)
+        self.merge_fun_param(lhs, rhs)
+        self.merge_fun_param(rhs, lhs)
         if not rhs.subsumes(lhs):
             return self.error(error.not_assignable_from(node.span, str(lhs), str(rhs)))
         return BoolTyp
@@ -543,20 +568,22 @@ class TypeCheck:
         if callee.typ.builtin:
             return callee.typ.result
         spec = self.specialize(callee.typ, node.args, node.span)
-        self.type_env.set(node.callee, Typ(spec.specialized))
+        self.type_env.set(node.callee, Typ(spec.specialized, origin_trail=[node]))
         return spec.specialized.result
 
     def tc_fun_def(self, node: ast.FunDef) -> Typ:
         params: list[Attr] = []
         with self.child_scope(node):
             for param in node.params:
-                param_typ = Typ(None)
-                if err := self.scope.bind(param.name, param_typ, mut=False):
+                self.visit(param, node)
+                param_typ = self.type_env.get(param)
+                param_typ.origin_trail.insert(-2, node)
+                if err := self.scope.bind(param.name, param_typ, mut=False, is_fun_param=True):
                     return self.error(err)
                 params.append(Attr(param.name, param_typ))
-            ast.walk(node, self.visit)
+            self.visit(node.body, node)
         return_typ = self.type_env.get(node.body)
-        typ = Typ(Fun(node.name, (*params,), return_typ, node.span, builtin=False))
+        typ = Typ(Fun(node.name, (*params,), return_typ, node.span, builtin=False), origin_trail=[node])
         log("typechecker-trace", f"Adding {typ.typ} to fun_defs", self.nesting_level)
         self.fun_defs[typ.typ] = node
         if err := self.scope.bind(node.name, typ, mut=False):
@@ -565,6 +592,8 @@ class TypeCheck:
             log("typechecker-trace", "Adding main to fun_defs", self.nesting_level)
             fun = typ.typ
             if len(fun.params) != 0 or fun.result != UnitTyp:
+                if fun.result.is_error():
+                    return Typ(error.cascaded_error(fun.result.typ, node.span), [])
                 return self.error(error.invalid_main(node.span))
             self.fun_specs[fun] = [FunSpec(self.type_env, node, fun, fun)]
         return typ
@@ -572,15 +601,17 @@ class TypeCheck:
     def tc_fun_def_specialized(self, node: ast.FunDef, fun: Fun) -> Typ:
         with self.child_scope(node):
             for param in fun.params:
-                if err := self.scope.bind(param.name, param.typ, mut=False):
+                if err := self.scope.bind(
+                    param.name, param.typ, mut=False, is_fun_param=True, can_shadow_parent_scopes=True
+                ):
                     return self.error(err)
             ast.walk(node, self.visit)
         return_typ = self.type_env.get(node.body)
         fun = replace(fun, result=return_typ)
-        return Typ(fun)
+        return Typ(fun, [node])
 
-    def tc_fun_param(self, _node: ast.FunParam) -> Typ:
-        return Typ(None)
+    def tc_fun_param(self, node: ast.FunParam) -> Typ:
+        return Typ(Shape.empty(node.span), [node])
 
     def tc_if(self, node: ast.If) -> Typ:
         ast.walk(node, self.visit)
@@ -601,11 +632,61 @@ class TypeCheck:
         ast.walk(node, self.visit)
         return self.tc_block(node.block)
 
+    def merge_fun_param(self, typ: Typ, merge_with: Typ | None) -> None:
+        """If `typ` is the type of a function parameter, make sure that all
+        `ast.Member` nodes in the origin trail of `typ` widen it to include
+        the member. After that, merge `typ` with `merge_with`.
+        """
+        # Search for a function param in the origin trail.
+        for i, param_node in enumerate(typ.origin_trail):  # noqa: B007
+            if isinstance(param_node, ast.FunParam):
+                break
+        else:
+            return
+        param_binding = self.scope.lookup(param_node.name)
+        assert param_binding, f"No type found for {param_node.name}"
+        if not param_binding.is_fun_param:
+            return
+        param_typ = param_binding.typ
+        log("typechecker-infer", f"Found fun param `{param_node.name}` with type `{param_typ}`", self.nesting_level)
+
+        # Now go down the trail and apply all member lookups.
+        for trail_node in typ.origin_trail[i:]:
+            match trail_node:
+                case ast.Member():
+                    log(
+                        "typechecker-infer",
+                        f"Merging `{param_typ}` with `{{{trail_node.name} {{}}}}`",
+                        self.nesting_level + 1,
+                    )
+                    param_typ.merge(
+                        Typ(
+                            Shape(
+                                None,
+                                (Attr(trail_node.name, Typ(Shape.empty(trail_node.span), [])),),
+                                (),
+                                (),
+                                trail_node.span,
+                            ),
+                            origin_trail=[trail_node],
+                        )
+                    )
+                    if isinstance(param_typ.typ, Shape):
+                        attr = param_typ.typ.attr(trail_node.name)
+                        assert attr
+                        param_typ = attr.typ
+        if merge_with:
+            param_typ.merge(merge_with)
+
     def tc_member(self, node: ast.Member) -> Typ:
         ast.walk(node, self.visit)
         typ = self.type_env.get(node.target)
         if typ.is_error():
             return typ
+        typ.origin_trail.append(node)
+        # Ensure that if we reference a function parameter, its shape also
+        # contains this member access.
+        self.merge_fun_param(typ, None)
         shape = typ.typ
         if not isinstance(shape, Shape):
             return self.error(error.unexpected_type(f"a shape with field `{node.name}`", str(shape), node.target.span))
@@ -632,7 +713,7 @@ class TypeCheck:
             if typ.is_error():
                 return typ
             attrs.append(Attr(attr.name, typ))
-        return Typ(Shape(None, tuple(attrs), (), (), node.span))
+        return Typ(Shape(None, tuple(attrs), (), (), node.span), origin_trail=[node])
 
     def tc_shape_literal(self, node: ast.ShapeLit) -> Typ:
         ast.walk(node, self.visit)
@@ -642,7 +723,7 @@ class TypeCheck:
             if typ.is_error():
                 return typ
             attrs.append(Attr(attr.name, typ))
-        typ = Typ(Shape(None, tuple(attrs), (), (), node.span))
+        typ = Typ(Shape(None, tuple(attrs), (), (), node.span), origin_trail=[node])
         if node.shape_ref:
             expected_shape = self.scope.lookup(node.shape_ref.name)
             if expected_shape is None:
@@ -658,7 +739,7 @@ class TypeCheck:
         typ = self.type_env.get(node.value)
         if typ.is_error():
             return typ
-        return Typ(Shape(None, (Attr(node.name, typ),), (), (), node.span))
+        return Typ(Shape(None, (Attr(node.name, typ),), (), (), node.span), origin_trail=[node])
 
     def tc_shape_decl(self, node: ast.ShapeDecl) -> Typ:
         ast.walk(node, self.visit)

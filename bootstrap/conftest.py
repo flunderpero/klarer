@@ -11,11 +11,13 @@ from typing import Any, Callable, cast
 from . import ast, compiler, error, gogen, ir, parser, token, types
 from .span import Span
 
-# Monkey patch all AST and type classes to not compare `id` and `span` in `==`.
+ignore_fields = {"id", "span", "origin_trail"}
+
+# Monkey patch all AST and type classes to ignore `ignore_fields` in `__eq__` and `__repr__`.
 for clazz in list(ast.__dict__.values()) + list(types.__dict__.values()):
     if not dataclasses.is_dataclass(clazz):
         continue
-    if not any(x.name in {"id", "span"} for x in dataclasses.fields(clazz)):
+    if not any(x.name in ignore_fields for x in dataclasses.fields(clazz)):
         continue
 
     def make_eq(clazz: Any) -> None:
@@ -27,7 +29,7 @@ for clazz in list(ast.__dict__.values()) + list(types.__dict__.values()):
             return all(
                 hasattr(self, x.name) and hasattr(other, x.name) and getattr(self, x.name) == getattr(other, x.name)
                 for x in dataclasses.fields(clazz)
-                if x.name not in {"id", "span"}
+                if x.name not in ignore_fields
             )
 
         clazz.__eq__ = eq
@@ -35,7 +37,7 @@ for clazz in list(ast.__dict__.values()) + list(types.__dict__.values()):
     def make_repr(clazz: Any) -> None:
         def repr_(self: Any) -> str:
             fields = ", ".join(
-                f"{x.name}={getattr(self, x.name)!r}" for x in dataclasses.fields(clazz) if x.name not in {"id", "span"}
+                f"{x.name}={getattr(self, x.name)!r}" for x in dataclasses.fields(clazz) if x.name not in ignore_fields
             )
             return f"{clazz.__name__}({fields})"
 
@@ -109,7 +111,11 @@ def typ(kind: Callable, **kwargs: Any) -> types.Typ:
             defaults.update({"name": None, "attrs": (), "variants": (), "behaviours": ()})
         case types.Fun:
             defaults.update({"name": None, "builtin": False})
-    return types.Typ(kind(**defaults | kwargs))
+    return types.Typ(kind(**defaults | kwargs), [])
+
+
+def empty_shape() -> types.Typ:
+    return typ(types.Shape, attrs=(), variants=(), behaviours=())
 
 
 def typecheck(code: str) -> TypeChecker:

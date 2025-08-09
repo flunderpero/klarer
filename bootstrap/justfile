@@ -16,7 +16,7 @@ lint *args:
     @grep '!only' TEST.md && exit 1 || true
     @grep '!skip' TEST.md && exit 1 || true
 
-test: test-pytest test-md
+test: test-pytest test-book-md test-md
 
 test-pytest *args:
     # Exclude `test_md.py` because we run it in `test-md`.
@@ -25,4 +25,8 @@ test-pytest *args:
 [positional-arguments]
 test-md *args:
     @cd .. && python3 -m bootstrap.test_md bootstrap/TEST.md -- "$@"
+
+[positional-arguments]
+test-book-md *args:
+    @cd .. && python3 -m bootstrap.test_md ./book.md -- "$@"
 

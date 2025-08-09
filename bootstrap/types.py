@@ -201,12 +201,12 @@ class Fun:
             return self.name + "_" + "_".join(params)
         return "_".join(params)
 
-    def subsumes(self, other: Typ) -> bool:
+    def subsumes(self, other: Any) -> bool:
         """A function subsumes the other function if all its parameters and
         result subsume the other function's parameters and result.
 
         Examples:
-        - fun(a {name Str}) subsumes fun(a {name Str})
+        - fun(a {name Str}) subsumes fun(a {})
 
         """
         if not isinstance(other, Fun):
@@ -436,7 +436,7 @@ class TypeCheck:
                 return spec
         return None
 
-    def specialize(self, fun: Fun, call_args: list[ast.Expr], span: Span) -> FunSpec:
+    def specialize(self, fun: Fun, call_args: list[ast.Expr], span: Span) -> FunSpec | error.Error:
         spec = self.fun_spec(fun, call_args)
         if spec:
             return spec
@@ -444,13 +444,14 @@ class TypeCheck:
             fun_def = self.fun_defs[fun]
             log("typechecker-mono", f">>> Specializing {fun} at call-site {span}", self.nesting_level)
 
-            params = (*(Attr(attr.name, self.type_env.get(arg)) for attr, arg in zip(fun.params, call_args)),)
-            specialized = Fun(
-                fun.name, params, Typ(Shape.empty(fun.span), origin_trail=[]), fun.span, builtin=fun.builtin
-            )
-
             base = self.type_env.get(fun_def)
+            params = (*(Attr(attr.name, self.type_env.get(arg)) for attr, arg in zip(fun.params, call_args)),)
+            specialized = Fun(fun.name, params, base.typ.result, fun.span, builtin=fun.builtin)
+
             spec = FunSpec(self.type_env, fun_def, base.typ, specialized)
+
+            if not spec.base.subsumes(spec.specialized):
+                return self.error(error.does_not_subsume(str(spec.specialized), str(spec.base), span)).typ
 
             log(
                 "typechecker-mono",
@@ -459,7 +460,7 @@ class TypeCheck:
             )
             typ = self.tc_fun_def_specialized(spec.fun_def, spec.specialized)
             if typ.is_error():
-                return spec
+                return error.cascaded_error(typ.typ, span)
             spec.specialized = replace(spec.specialized, result=typ.typ.result)
             log(
                 "typechecker-mono",
@@ -505,7 +506,7 @@ class TypeCheck:
                     if not binding.mut:
                         return self.error(error.not_mutable(node.target.name, node.target.span))
                     if not binding.typ.is_same(value):
-                        return self.error(error.not_assignable_from(node.target.span, str(binding.typ), str(value)))
+                        return self.error(error.is_not_same(str(value), str(binding.typ), node.target.span))
                 else:
                     log("typechecker-trace", f"Binding {node.target.name} to {value}", self.nesting_level)
                     self.scope.bind(node.target.name, value, mut=node.mut)
@@ -522,7 +523,7 @@ class TypeCheck:
                     )
                 self.merge_fun_param(shape, value)
                 if not attr.typ.is_same(value):
-                    return self.error(error.not_assignable_from(node.target.span, str(attr.typ), str(value)))
+                    return self.error(error.is_not_same(str(value), str(attr.typ), node.target.span))
             case _:
                 raise AssertionError(f"Unsupported target type: {node.target}")
         return UnitTyp
@@ -546,7 +547,7 @@ class TypeCheck:
         self.merge_fun_param(lhs, rhs)
         self.merge_fun_param(rhs, lhs)
         if not rhs.subsumes(lhs):
-            return self.error(error.not_assignable_from(node.span, str(lhs), str(rhs)))
+            return self.error(error.does_not_subsume(str(rhs), str(lhs), node.span))
         return BoolTyp
 
     def tc_block(self, node: ast.Block) -> Typ:
@@ -562,14 +563,30 @@ class TypeCheck:
         if callee.is_error():
             return callee
         if not isinstance(callee.typ, Fun):
-            return self.error(error.not_callable(node.callee.span, callee.span))
+            # This might be a function parameter being called - try to merge it.
+            if isinstance(node.callee, ast.Name):
+                fun = self.scope.lookup(node.callee.name)
+                if fun is not None and fun.is_fun_param:
+                    args = tuple(Attr(f"${i}", self.type_env.get(arg)) for i, arg in enumerate(node.args))
+                    self.merge_fun_param(
+                        callee, Typ(Fun(node.callee.name, args, callee.typ, node.callee.span, builtin=False), [])
+                    )
+            if not isinstance(callee.typ, Fun):
+                return self.error(error.not_callable(node.callee.span, callee.span))
+            return callee.typ.result
 
         # Build a specialized function if it is not a builtin.
         if callee.typ.builtin:
             return callee.typ.result
+
         spec = self.specialize(callee.typ, node.args, node.span)
+        if isinstance(spec, error.Error):
+            return Typ(error.cascaded_error(spec, node.span), [])
         self.type_env.set(node.callee, Typ(spec.specialized, origin_trail=[node]))
-        return spec.specialized.result
+
+        # Now check the types.
+        callee = spec.specialized
+        return callee.result
 
     def tc_fun_def(self, node: ast.FunDef) -> Typ:
         params: list[Attr] = []
@@ -625,7 +642,7 @@ class TypeCheck:
             else_typ = self.tc_block(node.else_block)
             # todo: if/else with different types should create a union type.
             if not typ.is_same(else_typ):
-                return self.error(error.not_assignable_from(node.span, str(typ), str(else_typ)))
+                return self.error(error.is_not_same(str(typ), str(else_typ), node.span))
         return typ
 
     def tc_if_arm(self, node: ast.IfArm) -> Typ:
@@ -668,12 +685,13 @@ class TypeCheck:
                                 (),
                                 trail_node.span,
                             ),
-                            origin_trail=[trail_node],
+                            [],
                         )
                     )
                     if isinstance(param_typ.typ, Shape):
                         attr = param_typ.typ.attr(trail_node.name)
                         assert attr
+                        attr.typ.origin_trail = param_typ.origin_trail
                         param_typ = attr.typ
         if merge_with:
             param_typ.merge(merge_with)
@@ -729,9 +747,7 @@ class TypeCheck:
             if expected_shape is None:
                 return self.error(error.undefined_name(node.shape_ref.name, node.shape_ref.span))
             if not typ.subsumes(expected_shape.typ):
-                return self.error(
-                    error.does_not_conform_to_shape(node.shape_ref.span, node.shape_ref.name, str(typ.typ))
-                )
+                return self.error(error.does_not_subsume(str(typ.typ), node.shape_ref.name, node.shape_ref.span))
         return typ
 
     def tc_shape_literal_attr(self, node: ast.ShapeLitAttr) -> Typ:

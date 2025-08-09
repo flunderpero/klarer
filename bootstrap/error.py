@@ -154,12 +154,12 @@ def wrong_number_of_type_args(type_params: int, type_args: int, span: Span, defi
     )
 
 
-def not_assignable_from(span: Span, target: str, from_: str) -> Error:
-    return SimpleError(span, f"`{from_}` is not assignable to `{target}`", _stack())
+def does_not_subsume(it: str, to: str, span: Span) -> Error:
+    return SimpleError(span, f"`{it}` does not conform to shape `{to}`", _stack())
 
 
-def does_not_conform_to_shape(span: Span, target: str, from_: str) -> Error:
-    return SimpleError(span, f"`{from_}` does not conform to shape `{target}`", _stack())
+def is_not_same(it: str, as_: str, span: Span) -> Error:
+    return SimpleError(span, f"`{it}` is not the same shape as `{as_}`", _stack())
 
 
 def not_mutable(name: str, span: Span) -> Error:

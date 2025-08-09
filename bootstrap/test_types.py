@@ -43,28 +43,28 @@ def test_assign_shape_literal_must_conform() -> None:
         mut foo = Person{name = "Peter", age = 42}
         foo = {age = 24}
     """)
-    assert errors == ["`{age Int}` is not assignable to `{name Str, age Int}`"]
+    assert errors == ["`{age Int}` is not the same shape as `{name Str, age Int}`"]
 
     # Wrong type.
     _, errors = typecheck_err("""
         mut foo = {field = 42}
         foo = {field = "Peter"}
     """)
-    assert errors == ["`{field Str}` is not assignable to `{field Int}`"]
+    assert errors == ["`{field Str}` is not the same shape as `{field Int}`"]
 
     # More attributes.
     _, errors = typecheck_err("""
         mut foo = {name = "Peter", age = 42}
         foo = {name = "Paul", age = 24, profession = "Nerd"}
     """)
-    assert errors == ["`{name Str, age Int, profession Str}` is not assignable to `{name Str, age Int}`"]
+    assert errors == ["`{name Str, age Int, profession Str}` is not the same shape as `{name Str, age Int}`"]
 
     # Nested shapes.
     _, errors = typecheck_err("""
         mut foo = {value = {pass = "Peter", age = 42}}
         foo.value = {pass = "Paul"}
     """)
-    assert errors == ["`{pass Str}` is not assignable to `{pass Str, age Int}`"]
+    assert errors == ["`{pass Str}` is not the same shape as `{pass Str, age Int}`"]
 
 
 def test_fun() -> None:
@@ -120,14 +120,45 @@ def test_fun_infer_from_binop() -> None:
 def test_fun_infer_from_accessing_member_of_shape() -> None:
     tc = typecheck("""
         f = fun(a) do
-            a.value
-            a
-        end """)
+            a.value.nested
+        end
+    """)
     assert tc.type_at(1, 1, ast.FunDef) == typ(
         types.Fun,
         name="f",
-        params=(types.Attr("a", typ(types.Shape, attrs=(types.Attr("value", empty_shape()),))),),
-        result=typ(types.Shape, attrs=(types.Attr("value", empty_shape()),)),
+        params=(
+            types.Attr(
+                "a",
+                typ(
+                    types.Shape,
+                    attrs=(types.Attr("value", typ(types.Shape, attrs=(types.Attr("nested", empty_shape()),))),),
+                ),
+            ),
+        ),
+        result=empty_shape(),
+    )
+
+
+def test_fun_infer_from_assigning_shape_attr() -> None:
+    tc = typecheck("""
+        f = fun(a) do
+            b = a.value
+            b.nested
+        end
+    """)
+    assert tc.type_at(1, 1, ast.FunDef) == typ(
+        types.Fun,
+        name="f",
+        params=(
+            types.Attr(
+                "a",
+                typ(
+                    types.Shape,
+                    attrs=(types.Attr("value", typ(types.Shape, attrs=(types.Attr("nested", empty_shape()),))),),
+                ),
+            ),
+        ),
+        result=empty_shape(),
     )
 
 
@@ -135,12 +166,63 @@ def test_fun_infer_from_assign_to_shape_attr() -> None:
     tc = typecheck("""
         f = fun(a) do
             a.value = 42
-        end """)
+        end
+    """)
     assert tc.type_at(1, 1, ast.FunDef) == typ(
         types.Fun,
         name="f",
         params=(types.Attr("a", typ(types.Shape, attrs=(types.Attr("value", types.IntTyp),))),),
         result=types.UnitTyp,
+    )
+
+
+def test_fun_infer_from_beign_passed_to_fun() -> None:
+    tc = typecheck("""
+        f = fun(a) do
+            a.value
+        end
+
+        g = fun(a) do
+            f(a)
+        end
+    """)
+    assert tc.type_at(1, 1, ast.FunDef) == typ(
+        types.Fun,
+        name="f",
+        params=(types.Attr("a", typ(types.Shape, attrs=(types.Attr("value", empty_shape()),))),),
+        result=empty_shape(),
+    )
+    assert tc.type_at(5, 1, ast.FunDef) == typ(
+        types.Fun,
+        name="g",
+        params=(types.Attr("a", typ(types.Shape, attrs=(types.Attr("value", empty_shape()),))),),
+        result=empty_shape(),
+    )
+
+
+def test_fun_infer_from_being_called() -> None:
+    tc = typecheck("""
+        f = fun(g) do
+            g(42, "hello")
+        end
+    """)
+    assert str(tc.type_at(1, 1, ast.FunDef)) == str(
+        typ(
+            types.Fun,
+            name="f",
+            params=(
+                types.Attr(
+                    "g",
+                    typ(
+                        types.Fun,
+                        name="g",
+                        params=(types.Attr("$0", types.IntTyp), types.Attr("$1", types.StrTyp)),
+                        result=empty_shape(),
+                    ),
+                ),
+            ),
+            result=empty_shape(),
+        )
     )
 
 
@@ -257,4 +339,4 @@ def test_write_member() -> None:
         foo = {name = "Peter", age = 42}
         foo.name = 42
     """)
-    assert errors == ["`Int` is not assignable to `Str`"]
+    assert errors == ["`Int` is not the same shape as `Str`"]

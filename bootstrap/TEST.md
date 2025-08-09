@@ -237,3 +237,17 @@ end
 ```
 PASS
 ```
+
+## Shape Inference
+
+**Infer based on property access**
+
+```klarer
+deeply_nested = fun(o) do
+    o.deeply.nested = 42
+end
+
+main = fun() do
+    v = deeply_nested({deeply = {nested = "FAIL"}}) -- ERROR: `fun deeply_nested(o {deeply {nested Str}}) -> Unit` does not conform to shape `fun deeply_nested(o {deeply {nested Int}}) -> Unit`
+end
+```

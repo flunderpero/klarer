@@ -105,6 +105,10 @@ def unexpected_token(span: Span, got: str, *expected: str) -> Error:
     return SimpleError(span, f"{prefix}{expected_names}, got `{got}`", _stack())
 
 
+def if_condition_must_not_contain_assigment(span: Span) -> Error:
+    return SimpleError(span, "If condition must not contain assignment", _stack())
+
+
 def expected_ident(expr: str, span: Span) -> Error:
     return SimpleError(span, f"Expected an identifier (lowercase), got `{expr}`", _stack())
 

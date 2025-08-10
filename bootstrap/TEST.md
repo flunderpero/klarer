@@ -169,10 +169,29 @@ end
 
 ```klarer
 deeply_nested = fun(o):
-    o.deeply.nested = 42
+    o.deeply.nested == 42
 end
 
 main = fun():
-    v = deeply_nested({deeply = {nested = "FAIL"}}) -- ERROR: `fun deeply_nested(o {deeply {nested Str}}) -> Unit` does not conform to shape `fun deeply_nested(o {deeply {nested Int}}) -> Unit`
+    v = deeply_nested({deeply = {nested = "FAIL"}}) -- ERROR: `fun deeply_nested(o {deeply {nested Str}}) -> Bool` does not conform to shape `fun deeply_nested(o {deeply {nested Int}}) -> Bool`
 end
+```
+
+## Assignment
+
+**Shape assignment creates a copy**
+
+```klarer
+main = fun():
+    a = {pass = "PASS"}
+    b = {b = "b", a = a}
+
+    print(a.pass)
+    print(b.a.pass)
+end
+```
+
+```
+PASS
+PASS
 ```

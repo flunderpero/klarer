@@ -189,7 +189,7 @@ class SumShape:
 @dataclass
 class Assign:
     id: NodeId
-    target: Expr
+    target: Name
     value: Expr
     span: Span
 
@@ -320,7 +320,7 @@ class Module:
 
 Shape = ShapeRef | FunShape | ProductShape | ProductShapeComp | SumShape
 Expr = BinaryExpr | Block | BoolLit | Call | CharLit | If | IntLit | Member | Name | StrLit | ShapeLit
-Node = Assign | Expr | FunDef | Module | Shape | Attr | ShapeDecl | ShapeLitAttr | IfArm | FunParam
+Node = Expr | Module | Shape | Attr | ShapeDecl | ShapeLitAttr | IfArm | FunParam | Assign | FunDef
 
 ASTVisitor = Callable[[Node, Node | None], Node]
 
@@ -365,7 +365,7 @@ def walk(node: Node, visit_: ASTVisitor) -> bool:
         case Loop():
             node.block = cast(Block, visit(node.block, node))
         case Assign():
-            node.target = cast(Expr, visit(node.target, node))
+            node.target = cast(Name, visit(node.target, node))
             node.value = cast(Expr, visit(node.value, node))
         case Member():
             node.target = cast(Expr, visit(node.target, node))

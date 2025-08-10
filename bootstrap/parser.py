@@ -467,14 +467,15 @@ class Parser:
                 nodes.append(node)
         return (ast.Block(self.id(), nodes, self.input.span_merge(span)), t)
 
-    def parse_assign(self, target: ast.Expr | None = None) -> ast.Assign | None:
+    def parse_assign_or_fun_def(self) -> ast.Assign | ast.FunDef | None:
         span = self.input.span()
-        if target is None:
-            target = self.parse_expr()
-            if not target:
-                return None
+        target = self.parse_name(token.Kind.ident)
+        if not target:
+            return None
         if not self.expect(token.Kind.eq):
             return None
+        if self.input.peek().kind == token.Kind.fun:
+            return self.parse_fun_def(target.name, span)
         value = self.parse_expr()
         if not value:
             return None
@@ -491,20 +492,13 @@ class Parser:
                         return self.parse_shape_decl()
             case token.Kind.behaviour_ns:
                 return self.parse_behaviour_fun_def()
+            case token.Kind.ident:
+                # This might be an assignment, a function definition, or an expression.
+                if self.input.peek1().kind == token.Kind.eq:
+                    return self.parse_assign_or_fun_def()
+                return self.parse_expr()
             case _:
-                expr = self.parse_expr()
-                if not expr:
-                    return None
-                if self.input.peek().kind == token.Kind.eq:
-                    # This is an assignment or a function definition.
-                    if self.input.peek1().kind == token.Kind.fun:
-                        self.input.next()
-                        if not isinstance(expr, ast.Name) or expr.kind != "ident":
-                            self.error(error.expected_ident(str(expr), t.span))
-                            return None
-                        return self.parse_fun_def(expr.name, t.span)
-                    return self.parse_assign(expr)
-                return expr
+                return self.parse_expr()
 
     def parse_module(self) -> ast.Module:
         span = self.input.span()

@@ -31,10 +31,8 @@ class Kind(Enum):
     ident = "identifier"
     if_ = "if"
     int_lit = "int literal"
-    loop = "loop"
     lt = "<"
     minus = "-"
-    mut = "mut"
     neq = "!="
     paren_left = "("
     paren_right = ")"
@@ -77,8 +75,6 @@ keywords = {
         Kind.false,
         Kind.fun,
         Kind.if_,
-        Kind.loop,
-        Kind.mut,
         Kind.true,
     )
 }

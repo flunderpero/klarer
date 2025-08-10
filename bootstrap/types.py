@@ -313,7 +313,6 @@ class TypeEnv:
 @dataclass
 class Binding:
     typ: Typ
-    mut: bool
     builtin: bool
     is_fun_param: bool
 
@@ -328,7 +327,7 @@ class Scope:
     def root() -> Scope:
         """The root scope with all the builtins."""
         span = Span("<builtin>", "", 0, 0)
-        binding_defaults = {"builtin": True, "is_fun_param": False, "mut": False}
+        binding_defaults = {"builtin": True, "is_fun_param": False}
         typ_defaults = {"origin_trail": []}
         scope = Scope(None, None, {})
         scope.bindings["print"] = Binding(
@@ -361,7 +360,7 @@ class Scope:
         return None
 
     def bind(
-        self, name: str, typ: Typ, *, mut: bool, is_fun_param: bool = False, can_shadow_parent_scopes: bool = False
+        self, name: str, typ: Typ, *, is_fun_param: bool = False, can_shadow_parent_scopes: bool = False
     ) -> error.Error | None:
         """Bind the name to the typ.
         An error is returned if the name is already bound to a different type.
@@ -372,7 +371,7 @@ class Scope:
         existing = self.lookup(name)
         if existing and (not can_shadow_parent_scopes or name in self.bindings):
             return error.duplicate_declaration(name, typ.span, existing.typ.span)
-        self.bindings[name] = Binding(typ, mut, builtin=False, is_fun_param=is_fun_param)
+        self.bindings[name] = Binding(typ, builtin=False, is_fun_param=is_fun_param)
         return None
 
     def inside(self, node_typ: type[ast.Node]) -> ast.Node | None:
@@ -499,33 +498,14 @@ class TypeCheck:
         value = self.type_env.get(node.value)
         if value.is_error():
             return value
-        match node.target:
-            case ast.Name():
-                binding = self.scope.lookup(node.target.name)
-                if binding is not None:
-                    if not binding.mut:
-                        return self.error(error.not_mutable(node.target.name, node.target.span))
-                    if not binding.typ.is_same(value):
-                        return self.error(error.is_not_same(str(value), str(binding.typ), node.target.span))
-                else:
-                    log("typechecker-trace", f"Binding {node.target.name} to {value}", self.nesting_level)
-                    self.scope.bind(node.target.name, value, mut=node.mut)
-                self.type_env.set(node.target, value)
-            case ast.Member():
-                self.visit(node.target, node)
-                shape = self.type_env.get(node.target.target)
-                if shape.is_error():
-                    return shape
-                attr = shape.typ.attr(node.target.name)
-                if attr is None:
-                    return self.error(
-                        error.no_member(node.target.name, str(shape), node.target.span, node.target.target.span)
-                    )
-                self.merge_fun_param(shape, value)
-                if not attr.typ.is_same(value):
-                    return self.error(error.is_not_same(str(value), str(attr.typ), node.target.span))
-            case _:
-                raise AssertionError(f"Unsupported target type: {node.target}")
+        binding = self.scope.lookup(node.target.name)
+        if binding is not None:
+            if not binding.typ.is_same(value):
+                return self.error(error.is_not_same(str(value), str(binding.typ), node.target.span))
+        else:
+            log("typechecker-trace", f"Binding {node.target.name} to {value}", self.nesting_level)
+            self.scope.bind(node.target.name, value)
+        self.type_env.set(node.target, value)
         return UnitTyp
 
     def tc_attr(self, node: ast.Attr) -> Typ:
@@ -595,7 +575,7 @@ class TypeCheck:
                 self.visit(param, node)
                 param_typ = self.type_env.get(param)
                 param_typ.origin_trail.insert(-2, node)
-                if err := self.scope.bind(param.name, param_typ, mut=False, is_fun_param=True):
+                if err := self.scope.bind(param.name, param_typ, is_fun_param=True):
                     return self.error(err)
                 params.append(Attr(param.name, param_typ))
             self.visit(node.body, node)
@@ -603,7 +583,7 @@ class TypeCheck:
         typ = Typ(Fun(node.name, (*params,), return_typ, node.span, builtin=False), origin_trail=[node])
         log("typechecker-trace", f"Adding {typ.typ} to fun_defs", self.nesting_level)
         self.fun_defs[typ.typ] = node
-        if err := self.scope.bind(node.name, typ, mut=False):
+        if err := self.scope.bind(node.name, typ):
             return self.error(err)
         if node.name == "main":
             log("typechecker-trace", "Adding main to fun_defs", self.nesting_level)
@@ -618,9 +598,7 @@ class TypeCheck:
     def tc_fun_def_specialized(self, node: ast.FunDef, fun: Fun) -> Typ:
         with self.child_scope(node):
             for param in fun.params:
-                if err := self.scope.bind(
-                    param.name, param.typ, mut=False, is_fun_param=True, can_shadow_parent_scopes=True
-                ):
+                if err := self.scope.bind(param.name, param.typ, is_fun_param=True, can_shadow_parent_scopes=True):
                     return self.error(err)
             ast.walk(node, self.visit)
         return_typ = self.type_env.get(node.body)
@@ -637,7 +615,7 @@ class TypeCheck:
         for arm in node.arms:
             arm_typ = self.tc_if_arm(arm)
             if not typ.is_same(arm_typ):
-                return self.error(error.unexpected_type(str(typ), str(arm_typ), arm.span))
+                return self.error(error.is_not_same(str(typ), str(arm_typ), arm.span))
         if node.else_block:
             else_typ = self.tc_block(node.else_block)
             # todo: if/else with different types should create a union type.
@@ -707,7 +685,7 @@ class TypeCheck:
         self.merge_fun_param(typ, None)
         shape = typ.typ
         if not isinstance(shape, Shape):
-            return self.error(error.unexpected_type(f"a shape with field `{node.name}`", str(shape), node.target.span))
+            return self.error(error.unexpected_shape(f"a shape with field `{node.name}`", str(shape), node.target.span))
         attr = shape.attr(node.name)
         if not attr:
             return self.error(error.no_member(node.name, str(shape), node.target.span, node.span))
@@ -762,7 +740,7 @@ class TypeCheck:
         typ = self.type_env.get(node.shape)
         if typ.is_error():
             return typ
-        if err := self.scope.bind(node.name, typ, mut=False):
+        if err := self.scope.bind(node.name, typ):
             return self.error(err)
         return UnitTyp
 

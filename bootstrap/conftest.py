@@ -89,8 +89,6 @@ def node(kind: Callable, **kwargs: Any) -> ast.Node:
     match kind:
         case ast.IntLit:
             defaults.update({"bits": 64, "signed": True})
-        case ast.Assign:
-            defaults.update({"mut": False})
         case ast.FunDef:
             defaults.update({"namespace": None})
         case ast.If:

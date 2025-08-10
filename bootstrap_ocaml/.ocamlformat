@@ -1,7 +1,0 @@
-profile = default
-version = 0.27.0
-
-if-then-else = vertical
-break-cases = fit-or-vertical
-type-decl = sparse
-margin = 100

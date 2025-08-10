@@ -24,15 +24,6 @@ def test_assign() -> None:
     )
 
 
-def test_mut_assign() -> None:
-    assert parse_first("mut x = 42") == node(
-        ast.Assign,
-        mut=True,
-        target=node(ast.Name, name="x"),
-        value=node(ast.IntLit, value=42),
-    )
-
-
 def test_fun_def() -> None:
     assert parse_first("foo = fun(a, b): end") == node(
         ast.FunDef,

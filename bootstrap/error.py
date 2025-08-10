@@ -105,16 +105,8 @@ def unexpected_token(span: Span, got: str, *expected: str) -> Error:
     return SimpleError(span, f"{prefix}{expected_names}, got `{got}`", _stack())
 
 
-def expected_at_least_one_if_case(span: Span) -> Error:
-    return SimpleError(span, "Expected at least one if case", _stack())
-
-
-def expected_assignment(got: str, span: Span) -> Error:
-    return SimpleError(span, f"Expected an assignment but got `{got}`", _stack())
-
-
-def expected_block_node(span: Span, token: str) -> Error:
-    return SimpleError(span, f"Expected a block node, got token `{token}`", _stack())
+def if_condition_must_not_contain_assigment(span: Span) -> Error:
+    return SimpleError(span, "If condition must not contain assignment", _stack())
 
 
 def expected_ident(expr: str, span: Span) -> Error:
@@ -133,25 +125,12 @@ def no_member(name: str, target: str, span: Span, target_defined_here: Span) -> 
     return WithDefinitionError(span, f"No member `{name}` in type `{target}`", target_defined_here, _stack())
 
 
-def unexpected_type(expected: str, got: str, span: Span) -> Error:
+def unexpected_shape(expected: str, got: str, span: Span) -> Error:
     return SimpleError(span, f"Expected {expected}, got {got}", _stack())
 
 
 def cascaded_error(cause: Error, span: Span) -> Error:
     return CascadedError(span, cause, _stack())
-
-
-def wrong_number_of_args(span: Span, params: int, args: int, defined_here: Span) -> Error:
-    return WithDefinitionError(span, f"Expected {params} arguments, got {args}", defined_here, _stack())
-
-
-def wrong_number_of_type_args(type_params: int, type_args: int, span: Span, defined_here: Span) -> Error:
-    return WithDefinitionError(
-        span,
-        f"Expected {type_params} type arguments, got {type_args}",
-        defined_here,
-        _stack(),
-    )
 
 
 def does_not_subsume(it: str, to: str, span: Span) -> Error:
@@ -162,86 +141,8 @@ def is_not_same(it: str, as_: str, span: Span) -> Error:
     return SimpleError(span, f"`{it}` is not the same shape as `{as_}`", _stack())
 
 
-def not_mutable(name: str, span: Span) -> Error:
-    return SimpleError(span, f"`{name}` is not mutable", _stack())
-
-
-def break_outside_loop(span: Span) -> Error:
-    return SimpleError(span, "`break` outside of a loop", _stack())
-
-
-def continue_outside_loop(span: Span) -> Error:
-    return SimpleError(span, "`continue` outside of a loop", _stack())
-
-
-def not_generic(span: Span, defined_here: Span) -> Error:
-    return WithDefinitionError(span, "Type is not generic", defined_here, _stack())
-
-
-def type_param_not_bound(name: str, span: Span) -> Error:
-    return SimpleError(span, f"Type parameter `{name}` is not bound to a trait", _stack())
-
-
-def invalid_type_param_bound(name: str, span: Span) -> Error:
-    return SimpleError(span, f"Invalid type parameter bound for type parameter `{name}`", _stack())
-
-
-def self_not_allowed_here(span: Span) -> Error:
-    return SimpleError(span, "`self` is not allowed here", _stack())
-
-
-def self_must_be_first_parameter(span: Span) -> Error:
-    return SimpleError(span, "`self` must be the first parameter", _stack())
-
-
 def not_callable(span: Span, defined_here: Span) -> Error:
     return WithDefinitionError(span, "Only functions and structs can be called", defined_here, _stack())
-
-
-def not_declared_in_current_scope(name: str, span: Span) -> Error:
-    return SimpleError(span, f"`{name}` is not declared in the current scope", _stack())
-
-
-def trait_method_impl_missing(trait_name: str, method_name: str, trait_span: Span, span: Span) -> Error:
-    return WithDefinitionError(
-        span,
-        f"Missing implementation of trait method `{method_name}` in trait `{trait_name}`",
-        trait_span,
-        _stack(),
-    )
-
-
-def trait_method_impl_mismatch(trait_method_signature: str, impl_signature: str, trait_span: Span, span: Span) -> Error:
-    return WithDefinitionError(
-        span,
-        f"Method signature `{impl_signature}` does not match trait method signature `{trait_method_signature}`",
-        trait_span,
-        _stack(),
-    )
-
-
-def trait_qualifier_mismatch(
-    trait_signature: str,
-    existing_trait_signature: str,
-    target_fqn: str,
-    trait_span: Span,
-    span: Span,
-) -> Error:
-    return WithDefinitionError(
-        span,
-        f"Trait {trait_signature} has already been implemented for "
-        f"`{target_fqn}` with signature `{existing_trait_signature}`",
-        trait_span,
-        _stack(),
-    )
-
-
-def traits_cannot_implement_traits(span: Span) -> Error:
-    return SimpleError(span, "Traits cannot implement other traits", _stack())
-
-
-def return_outside_function(span: Span) -> Error:
-    return SimpleError(span, "`return` outside of a function", _stack())
 
 
 def invalid_main(span: Span) -> Error:

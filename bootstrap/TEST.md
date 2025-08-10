@@ -139,34 +139,6 @@ else is taken:
 PASS
 ```
 
-**Mutating variables that are defined outside the if**
-
-```klarer
-main = fun():
-    mut pass = "FAIL"
-    mut num = 42
-
-    if
-        case false:
-            pass = "FAIL!"
-            num = 0
-        case true:
-            pass = "PASS"
-        else:
-            pass = "FAIL!!"
-            num = 137
-    end
-
-    print(pass)
-    print(int_to_str(num))
-end
-```
-
-```
-PASS
-42
-```
-
 **Capturing the result of an if expression**
 
 ```klarer
@@ -191,63 +163,35 @@ main = fun():
 end
 ```
 
-## Mutability
-
-### Mutable Variables
-
-```klarer
-main = fun():
-    mut s = "FAIL"
-    s = "PASS"
-    print(s)
-end
-```
-
-```
-PASS
-```
-
-**Mutable variables must be marked with `mut`**
-
-```klarer
-main = fun():
-    s = "FAIL"
-    s = "PASS" -- ERROR: `s` is not mutable
-end
-```
-
-### Mutable Function Parameters
-
-> [!TODO]
-> We need to actually mark the function parameter as mutable.
-> For now, all non-primitive parameters are just mutable.
-
-```klarer
-f = fun(v):
-    v.value = "PASS"
-end
-
-main = fun():
-    mut v = {value = "FAIL"}
-    f(v)
-    print(v.value)
-end
-```
-
-```
-PASS
-```
-
 ## Shape Inference
 
 **Infer based on property access**
 
 ```klarer
 deeply_nested = fun(o):
-    o.deeply.nested = 42
+    o.deeply.nested == 42
 end
 
 main = fun():
-    v = deeply_nested({deeply = {nested = "FAIL"}}) -- ERROR: `fun deeply_nested(o {deeply {nested Str}}) -> Unit` does not conform to shape `fun deeply_nested(o {deeply {nested Int}}) -> Unit`
+    v = deeply_nested({deeply = {nested = "FAIL"}}) -- ERROR: `fun deeply_nested(o {deeply {nested Str}}) -> Bool` does not conform to shape `fun deeply_nested(o {deeply {nested Int}}) -> Bool`
 end
+```
+
+## Assignment
+
+**Shape assignment creates a copy**
+
+```klarer
+main = fun():
+    a = {pass = "PASS"}
+    b = {b = "b", a = a}
+
+    print(a.pass)
+    print(b.a.pass)
+end
+```
+
+```
+PASS
+PASS
 ```

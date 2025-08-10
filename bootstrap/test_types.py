@@ -292,7 +292,7 @@ def test_shape_literal_must_conform_to_shape_alias() -> None:
     assert errors == ["`{value Int}` does not conform to shape `Value`"]
 
 
-def test_shape_literal_can_subsume_shape_alias() -> None:
+def test_shape_literal_can_conform_to_shape_alias() -> None:
     tc = typecheck("""
         Value = {value {}}
         v = Value{value = {name = "Peter"}}

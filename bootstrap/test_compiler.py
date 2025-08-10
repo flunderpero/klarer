@@ -16,7 +16,7 @@ def test_happy_path() -> None:
     """)
 
 
-def test_shape_literal_can_subsume_shape_alias() -> None:
+def test_shape_literal_can_conform_to_shape_alias() -> None:
     stdout = compile_and_run_success("""
         Value = {value {}}
 

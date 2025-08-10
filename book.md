@@ -36,7 +36,7 @@ PASS
 
 In this example, the signature of `get_value` is inferred to be `fun(o {value {}})` where `o` is
 said to be _"anything with a `value` attribute"_, where the value attribute is the empty shape `{}`.
-The empty shape `{}` is subsumed by any other shape, i.e. any shape conforms to the empty shape.
+The empty shape `{}` is conforms to any other shape.
 
 The return shape of `get_value` is inferred to be the same as the parameter shape `o`.
 

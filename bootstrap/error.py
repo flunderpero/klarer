@@ -133,7 +133,7 @@ def cascaded_error(cause: Error, span: Span) -> Error:
     return CascadedError(span, cause, _stack())
 
 
-def does_not_subsume(it: str, to: str, span: Span) -> Error:
+def does_not_conform_to(it: str, to: str, span: Span) -> Error:
     return SimpleError(span, f"`{it}` does not conform to shape `{to}`", _stack())
 
 

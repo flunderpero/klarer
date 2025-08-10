@@ -43,9 +43,9 @@ class Primitive:
     def mangled_name(self) -> str:
         return self.name
 
-    def subsumes(self, other: Typ) -> bool:
-        # For now, all primitives never subsume anything. Later on, when we have different
-        # sized integers, I16 will subsume I8, etc.
+    def conforms_to(self, other: Typ) -> bool:
+        # For now, all primitives only conform to themselves. Later on, when we have different
+        # sized integers, I8 will conform to I16, etc.
         return self == other
 
 
@@ -63,8 +63,8 @@ class Attr:
     def mangled_name(self) -> str:
         return self.name + "_" + self.typ.mangled_name()
 
-    def subsumes(self, other: Typ) -> bool:
-        return isinstance(other, Attr) and self.name == other.name and self.typ.subsumes(other.typ)
+    def conforms_to(self, other: Typ) -> bool:
+        return isinstance(other, Attr) and self.name == other.name and self.typ.conforms_to(other.typ)
 
 
 def same_tuple(a: tuple[Any, ...], b: tuple[Any, ...]) -> bool:
@@ -124,32 +124,32 @@ class Shape:
     def is_empty(self) -> bool:
         return not self.attrs and not self.variants and not self.behaviours
 
-    def subsumes(self, other: Typ) -> bool:
-        """A shape subsumes the other shape if it has at least all the
+    def conforms_to(self, other: Typ) -> bool:
+        """A shape conforms the other shape if it has at least all the
         attributes, variants, and behaviours of the other shape.
 
-        The empty shape `{}` subsumes any other shape, function, or primitive.
+        The empty shape `{}` conforms any other shape, function, or primitive.
 
         Examples:
-        - {name Str, age Int} subsumes {name Str}
-        - {} subsumes any shape, function, or primitive
+        - {name Str, age Int} conforms to {name Str}
+        - {} conforms any shape, function, or primitive
 
         """
         if not isinstance(other, (Shape, Primitive, Fun)):
             return False
         if self.is_empty():
-            return True  # {} subsumes everything
+            return True  # {} conforms to everything
         if not isinstance(other, Shape):
             return False
 
         # All attributes of `other` must be present in `self`.
         for attr in other.attrs:
-            if not any(x.typ.subsumes(attr.typ) for x in self.attrs):
+            if not any(x.typ.conforms_to(attr.typ) for x in self.attrs):
                 return False  # Other is missing a required attribute
 
         # All variants of `other` must be present in `self`.
         for variant in other.variants:
-            if not any(x.typ.subsumes(variant.typ) for x in self.variants):
+            if not any(x.typ.conforms_to(variant.typ) for x in self.variants):
                 return False
 
         # All behaviours of `other` must be present in `self`.
@@ -201,22 +201,22 @@ class Fun:
             return self.name + "_" + "_".join(params)
         return "_".join(params)
 
-    def subsumes(self, other: Any) -> bool:
-        """A function subsumes the other function if all its parameters and
-        result subsume the other function's parameters and result.
+    def conforms_to(self, other: Any) -> bool:
+        """A function conforms the other function if all its parameters and
+        result conform the other function's parameters and result.
 
         Examples:
-        - fun(a {name Str}) subsumes fun(a {})
+        - fun(a {name Str}) conforms to fun(a {})
 
         """
         if not isinstance(other, Fun):
             return False
         if len(self.params) != len(other.params):
             return False
-        if not self.result.subsumes(other.result):
+        if not self.result.conforms_to(other.result):
             return False
         for param, other_param in zip(self.params, other.params):  # noqa: SIM110
-            if not param.typ.subsumes(other_param.typ):
+            if not param.typ.conforms_to(other_param.typ):
                 return False
         return True
 
@@ -248,10 +248,10 @@ class Typ[T: Primitive | Shape | Fun | error.Error]:
     def is_empty_shape(self) -> bool:
         return isinstance(self.typ, Shape) and self.typ.is_empty()
 
-    def subsumes(self, other: Typ) -> bool:
+    def conforms_to(self, other: Typ) -> bool:
         if isinstance(self.typ, error.Error):
             return False
-        return self.typ.subsumes(other.typ)
+        return self.typ.conforms_to(other.typ)
 
     def merge(self, other: Typ) -> None:
         if self.is_empty_shape():
@@ -449,8 +449,8 @@ class TypeCheck:
 
             spec = FunSpec(self.type_env, fun_def, base.typ, specialized)
 
-            if not spec.base.subsumes(spec.specialized):
-                return self.error(error.does_not_subsume(str(spec.specialized), str(spec.base), span)).typ
+            if not spec.base.conforms_to(spec.specialized):
+                return self.error(error.does_not_conform_to(str(spec.specialized), str(spec.base), span)).typ
 
             log(
                 "typechecker-mono",
@@ -526,8 +526,8 @@ class TypeCheck:
         # We can directly merge the types of the two operands.
         self.merge_fun_param(lhs, rhs)
         self.merge_fun_param(rhs, lhs)
-        if not rhs.subsumes(lhs):
-            return self.error(error.does_not_subsume(str(rhs), str(lhs), node.span))
+        if not rhs.conforms_to(lhs):
+            return self.error(error.does_not_conform_to(str(rhs), str(lhs), node.span))
         return BoolTyp
 
     def tc_block(self, node: ast.Block) -> Typ:
@@ -724,8 +724,8 @@ class TypeCheck:
             expected_shape = self.scope.lookup(node.shape_ref.name)
             if expected_shape is None:
                 return self.error(error.undefined_name(node.shape_ref.name, node.shape_ref.span))
-            if not typ.subsumes(expected_shape.typ):
-                return self.error(error.does_not_subsume(str(typ.typ), node.shape_ref.name, node.shape_ref.span))
+            if not typ.conforms_to(expected_shape.typ):
+                return self.error(error.does_not_conform_to(str(typ.typ), node.shape_ref.name, node.shape_ref.span))
         return typ
 
     def tc_shape_literal_attr(self, node: ast.ShapeLitAttr) -> Typ:

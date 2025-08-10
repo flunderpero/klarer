@@ -34,7 +34,7 @@ def test_mut_assign() -> None:
 
 
 def test_fun_def() -> None:
-    assert parse_first("foo = fun(a, b) do end") == node(
+    assert parse_first("foo = fun(a, b): end") == node(
         ast.FunDef,
         name="foo",
         params=[node(ast.FunParam, name="a"), node(ast.FunParam, name="b")],
@@ -43,7 +43,7 @@ def test_fun_def() -> None:
 
 
 def test_fun_def_with_behaviour_ns() -> None:
-    assert parse_first("@Foo.bar = fun(a, b) do end") == node(
+    assert parse_first("@Foo.bar = fun(a, b): end") == node(
         ast.FunDef,
         name="bar",
         namespace="Foo",
@@ -186,17 +186,17 @@ def test_member() -> None:
 
 
 def test_if() -> None:
-    assert parse_first("if case true do end") == node(
+    assert parse_first("if case true: end") == node(
         ast.If, arms=[node(ast.IfArm, cond=node(ast.BoolLit, value=True), block=node(ast.Block, nodes=[]))]
     )
     assert parse_first(
         """
         if
-            case true do
+            case true:
                 1
-            case false do
+            case false:
                 2
-            else do
+            else:
                 3
         end
         """
@@ -226,8 +226,8 @@ def test_call() -> None:
 
 
 def test_block() -> None:
-    assert parse_first("do end") == node(ast.Block, nodes=[])
-    assert parse_first("do 42 end") == node(ast.Block, nodes=[node(ast.IntLit, value=42)])
+    assert parse_first(": end") == node(ast.Block, nodes=[])
+    assert parse_first(": 42 end") == node(ast.Block, nodes=[node(ast.IntLit, value=42)])
 
 
 def parse_shape_decl(code: str, expected_name: str) -> ast.Shape:

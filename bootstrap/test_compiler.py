@@ -6,7 +6,7 @@ from .conftest import compile_and_run_success, stripln
 def test_happy_path() -> None:
     stdout = compile_and_run_success("""
 
-        main = fun() do
+        main = fun():
             print("PASS")
         end
 
@@ -18,7 +18,7 @@ def test_happy_path() -> None:
 
 def test_mut_assign_shapes_with_different_attribute_order() -> None:
     stdout = compile_and_run_success("""
-        main = fun() do
+        main = fun():
             mut x = {name = "PASS1", age = 42}
             print(x.name)
             x = {age = 24, name = "PASS2"}
@@ -35,7 +35,7 @@ def test_shape_literal_can_subsume_shape_alias() -> None:
     stdout = compile_and_run_success("""
         Value = {value {}}
 
-        main = fun() do
+        main = fun():
             v = Value{value = {status = "PASS"}}
             print(v.value.status)
         end
@@ -48,11 +48,11 @@ def test_shape_literal_can_subsume_shape_alias() -> None:
 def test_call() -> None:
     stdout = compile_and_run_success("""
 
-        what_to_print = fun() do
+        what_to_print = fun():
             "PASS"
         end
 
-        main = fun() do
+        main = fun():
             print(what_to_print())
         end
 
@@ -64,7 +64,7 @@ def test_call() -> None:
 
 def test_read_member_of_simple_shape_literal() -> None:
     stdout = compile_and_run_success("""
-        main = fun() do
+        main = fun():
             foo = {name = "PASS", age = 42}
             print(foo.name)
         end
@@ -77,7 +77,7 @@ def test_read_member_of_simple_shape_literal() -> None:
 def test_read_member_of_nested_shape_literal() -> None:
     stdout = compile_and_run_success(
         """
-        main = fun() do
+        main = fun():
             foo = {value = {pass = "PASS", age = 42}}
             print(foo.value.pass)
         end
@@ -91,7 +91,7 @@ def test_read_member_of_nested_shape_literal() -> None:
 def test_write_member_of_simple_shape_literal() -> None:
     stdout = compile_and_run_success(
         """
-        main = fun() do
+        main = fun():
             foo = {name = "FAIL", age = 42}
             foo.name = "PASS"
             print(foo.name)
@@ -106,7 +106,7 @@ def test_write_member_of_simple_shape_literal() -> None:
 def test_write_member_of_nested_shape_literal() -> None:
     stdout = compile_and_run_success(
         """
-        main = fun() do
+        main = fun():
             foo = {value = {pass = "FAIL", age = 42}}
             foo.value.pass = "PASS"
             print(foo.value.pass)

@@ -360,7 +360,7 @@ class Parser:
         t = self.input.peek()
         expr: ast.Expr | None
         match t.kind:
-            case token.Kind.do:
+            case token.Kind.colon:
                 return self.parse_block()[0]
             case token.Kind.ident:
                 expr = self.parse_name(t.kind)
@@ -464,7 +464,7 @@ class Parser:
         self, expected_end: tuple[token.Kind, ...] = (token.Kind.end,)
     ) -> tuple[ast.Block | None, token.Token | None]:
         span = self.input.span()
-        if not self.expect(token.Kind.do):
+        if not self.expect(token.Kind.colon):
             return (None, None)
         nodes: list[ast.Node] = []
         while (t := self.input.peek()).kind != token.Kind.eof:

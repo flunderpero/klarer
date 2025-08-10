@@ -19,7 +19,7 @@ def test_literals() -> None:
 
 def test_block() -> None:
     tc = typecheck("""
-        do
+       :
             "hello"
             42
         end
@@ -68,11 +68,11 @@ def test_assign_shape_literal_must_conform() -> None:
 
 
 def test_fun() -> None:
-    tc = typecheck(""" f = fun() do 42 end """)
+    tc = typecheck(""" f = fun(): 42 end """)
     assert tc.type_at(1, 1, ast.FunDef) == types.Typ(
         types.Fun("f", (), types.IntTyp, types.builtin_span, builtin=False), []
     )
-    tc = typecheck(""" main = fun() do end """)
+    tc = typecheck(""" main = fun(): end """)
     assert tc.type_at(1, 1, ast.FunDef) == types.Typ(
         types.Fun("main", (), types.UnitTyp, types.builtin_span, builtin=False), []
     )
@@ -81,7 +81,7 @@ def test_fun() -> None:
 def test_fun_infer_from_member() -> None:
     tc = typecheck(
         """
-            f = fun(a) do
+            f = fun(a):
                 a.value
                 a
             end """
@@ -111,7 +111,7 @@ def test_fun_infer_from_member() -> None:
 
 
 def test_fun_infer_from_binop() -> None:
-    tc = typecheck(""" f = fun(a) do a == 42 end """)
+    tc = typecheck(""" f = fun(a): a == 42 end """)
     assert tc.type_at(1, 1, ast.FunDef) == types.Typ(
         types.Fun("f", (types.Attr("a", types.IntTyp),), types.BoolTyp, types.builtin_span, builtin=False), []
     )
@@ -119,7 +119,7 @@ def test_fun_infer_from_binop() -> None:
 
 def test_fun_infer_from_accessing_member_of_shape() -> None:
     tc = typecheck("""
-        f = fun(a) do
+        f = fun(a):
             a.value.nested
         end
     """)
@@ -141,7 +141,7 @@ def test_fun_infer_from_accessing_member_of_shape() -> None:
 
 def test_fun_infer_from_assigning_shape_attr() -> None:
     tc = typecheck("""
-        f = fun(a) do
+        f = fun(a):
             b = a.value
             b.nested
         end
@@ -164,7 +164,7 @@ def test_fun_infer_from_assigning_shape_attr() -> None:
 
 def test_fun_infer_from_assign_to_shape_attr() -> None:
     tc = typecheck("""
-        f = fun(a) do
+        f = fun(a):
             a.value = 42
         end
     """)
@@ -178,11 +178,11 @@ def test_fun_infer_from_assign_to_shape_attr() -> None:
 
 def test_fun_infer_from_beign_passed_to_fun() -> None:
     tc = typecheck("""
-        f = fun(a) do
+        f = fun(a):
             a.value
         end
 
-        g = fun(a) do
+        g = fun(a):
             f(a)
         end
     """)
@@ -202,7 +202,7 @@ def test_fun_infer_from_beign_passed_to_fun() -> None:
 
 def test_fun_infer_from_being_called() -> None:
     tc = typecheck("""
-        f = fun(g) do
+        f = fun(g):
             g(42, "hello")
         end
     """)
@@ -228,7 +228,7 @@ def test_fun_infer_from_being_called() -> None:
 
 def test_call_without_params() -> None:
     tc = typecheck("""
-        f = fun() do 42 end
+        f = fun(): 42 end
         f()
     """)
     assert tc.type_at(2, 1, ast.Call) == types.IntTyp
@@ -236,7 +236,7 @@ def test_call_without_params() -> None:
 
 def test_call_specialization() -> None:
     tc = typecheck("""
-        f = fun(a) do a end
+        f = fun(a): a end
         f(42)
         f(true)
         f("hello")
@@ -271,7 +271,7 @@ def test_shape_literal() -> None:
     tc = typecheck("""
         Person = {name Str, age Int}
 
-        main = fun() do
+        main = fun():
             p = Person{name = "John", age = 42}
         end
     """)

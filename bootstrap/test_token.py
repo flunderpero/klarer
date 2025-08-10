@@ -12,7 +12,7 @@ def test_token() -> None:
 
     List = {elements []{}, index Int}
 
-    @List.new = fun() do end
+    @List.new = fun(): end
 
     42 "hello" 'c' true false
 
@@ -42,7 +42,7 @@ def test_token() -> None:
         (token.Kind.fun, None),
         (token.Kind.paren_left, None),
         (token.Kind.paren_right, None),
-        (token.Kind.do, None),
+        (token.Kind.colon, None),
         (token.Kind.end, None),
         (token.Kind.int_lit, "42"),
         (token.Kind.str_lit, "hello"),

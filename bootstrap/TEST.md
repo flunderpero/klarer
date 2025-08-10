@@ -12,7 +12,7 @@ Let's start with some examples to get a feel for the language and this test-suit
 ### Hello, world!
 
 ```klarer
-main = fun() do
+main = fun():
     print("Hello, world!")
 end
 ```
@@ -26,7 +26,7 @@ Hello, world!
 ### String
 
 ```klarer
-main = fun() do
+main = fun():
     print("PASS")
 end
 ```
@@ -38,7 +38,7 @@ PASS
 ### Boolean
 
 ```klarer
-main = fun() do
+main = fun():
     t = true
     f = false
     print(bool_to_str(t))
@@ -56,7 +56,7 @@ false
 For now, we only support `Int` which is a 64-bit signed integer.
 
 ```klarer
-main = fun() do
+main = fun():
     a = 42
     b = -42
     print(int_to_str(a))
@@ -72,7 +72,7 @@ end
 **Minimum and maximum values**
 
 ```klarer
-main = fun() do
+main = fun():
     a = 9223372036854775807
     b = -9223372036854775808
     print(int_to_str(a))
@@ -88,7 +88,7 @@ end
 ### Char
 
 ```klarer
-main = fun() do
+main = fun():
     a = 'a'
     print(char_to_str(a))
 end
@@ -101,8 +101,8 @@ a
 ### If Expressions
 
 ```klarer
-main = fun() do
-    if case true do
+main = fun():
+    if case true:
         print("PASS")
     end
 end
@@ -115,19 +115,19 @@ PASS
 **Multiple cases and else**
 
 ```klarer
-main = fun() do
+main = fun():
     print("middle one is taken:")
     if
-        case false do print("FAIL")
-        case true do print("PASS")
-        else do print("FAIL")
+        case false: print("FAIL")
+        case true: print("PASS")
+        else: print("FAIL")
     end
 
     print("else is taken:")
     if
-        case false do print("FAIL")
-        case false do print("FAIL")
-        else do print("PASS")
+        case false: print("FAIL")
+        case false: print("FAIL")
+        else: print("PASS")
     end
 end
 ```
@@ -142,17 +142,17 @@ PASS
 **Mutating variables that are defined outside the if**
 
 ```klarer
-main = fun() do
+main = fun():
     mut pass = "FAIL"
     mut num = 42
 
     if
-        case false do
+        case false:
             pass = "FAIL!"
             num = 0
-        case true do
+        case true:
             pass = "PASS"
-        else do
+        else:
             pass = "FAIL!!"
             num = 137
     end
@@ -170,10 +170,10 @@ PASS
 **Capturing the result of an if expression**
 
 ```klarer
-main = fun() do
+main = fun():
     s = if
-        case false do "FAIL"
-        case true do "PASS"
+        case false: "FAIL"
+        case true: "PASS"
     end
     print(s)
 end
@@ -186,8 +186,8 @@ PASS
 **At least one if case**
 
 ```klarer
-main = fun() do
-    if else do end -- ERROR: Expected `case`, got `else`
+main = fun():
+    if else: end -- ERROR: Expected `case`, got `else`
 end
 ```
 
@@ -196,7 +196,7 @@ end
 ### Mutable Variables
 
 ```klarer
-main = fun() do
+main = fun():
     mut s = "FAIL"
     s = "PASS"
     print(s)
@@ -210,7 +210,7 @@ PASS
 **Mutable variables must be marked with `mut`**
 
 ```klarer
-main = fun() do
+main = fun():
     s = "FAIL"
     s = "PASS" -- ERROR: `s` is not mutable
 end
@@ -223,11 +223,11 @@ end
 > For now, all non-primitive parameters are just mutable.
 
 ```klarer
-f = fun(v) do
+f = fun(v):
     v.value = "PASS"
 end
 
-main = fun() do
+main = fun():
     mut v = {value = "FAIL"}
     f(v)
     print(v.value)
@@ -243,11 +243,11 @@ PASS
 **Infer based on property access**
 
 ```klarer
-deeply_nested = fun(o) do
+deeply_nested = fun(o):
     o.deeply.nested = 42
 end
 
-main = fun() do
+main = fun():
     v = deeply_nested({deeply = {nested = "FAIL"}}) -- ERROR: `fun deeply_nested(o {deeply {nested Str}}) -> Unit` does not conform to shape `fun deeply_nested(o {deeply {nested Int}}) -> Unit`
 end
 ```

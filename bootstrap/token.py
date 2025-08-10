@@ -14,11 +14,11 @@ class Kind(Enum):
     braket_right = "]"
     case = "case"
     char_lit = "char literal"
+    colon = ":"
     comma = ","
     comment = "--"
     curly_left = "{"
     curly_right = "}"
-    do = "do"
     dot = "."
     else_ = "else"
     end = "end"
@@ -72,7 +72,6 @@ keywords = {
     for x in (
         Kind.bind,
         Kind.case,
-        Kind.do,
         Kind.else_,
         Kind.end,
         Kind.false,
@@ -145,6 +144,8 @@ def tokenize(input: Input) -> tuple[list[Token], list[error.Error]]:
                 kind = Kind.gt
             case "|":
                 kind = Kind.pipe
+            case ":":
+                kind = Kind.colon
             case "!":
                 if input.peek() == "=":
                     input.next()

@@ -15,11 +15,11 @@ The shape of a function is determined by the use of its parameters and its resul
 
 ```klarer
 
-get_value = fun(o) do
+get_value = fun(o):
     o.value
 end
 
-main = fun() do
+main = fun():
     str_value = {value = "PASS"}
     print(get_value(str_value))
 

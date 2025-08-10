@@ -498,31 +498,14 @@ class TypeCheck:
         value = self.type_env.get(node.value)
         if value.is_error():
             return value
-        match node.target:
-            case ast.Name():
-                binding = self.scope.lookup(node.target.name)
-                if binding is not None:
-                    if not binding.typ.is_same(value):
-                        return self.error(error.is_not_same(str(value), str(binding.typ), node.target.span))
-                else:
-                    log("typechecker-trace", f"Binding {node.target.name} to {value}", self.nesting_level)
-                    self.scope.bind(node.target.name, value)
-                self.type_env.set(node.target, value)
-            case ast.Member():
-                self.visit(node.target, node)
-                shape = self.type_env.get(node.target.target)
-                if shape.is_error():
-                    return shape
-                attr = shape.typ.attr(node.target.name)
-                if attr is None:
-                    return self.error(
-                        error.no_member(node.target.name, str(shape), node.target.span, node.target.target.span)
-                    )
-                self.merge_fun_param(shape, value)
-                if not attr.typ.is_same(value):
-                    return self.error(error.is_not_same(str(value), str(attr.typ), node.target.span))
-            case _:
-                raise AssertionError(f"Unsupported target type: {node.target}")
+        binding = self.scope.lookup(node.target.name)
+        if binding is not None:
+            if not binding.typ.is_same(value):
+                return self.error(error.is_not_same(str(value), str(binding.typ), node.target.span))
+        else:
+            log("typechecker-trace", f"Binding {node.target.name} to {value}", self.nesting_level)
+            self.scope.bind(node.target.name, value)
+        self.type_env.set(node.target, value)
         return UnitTyp
 
     def tc_attr(self, node: ast.Attr) -> Typ:

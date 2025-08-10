@@ -71,33 +71,3 @@ def test_read_member_of_nested_shape_literal() -> None:
     assert stdout == stripln("""
         PASS
     """)
-
-
-def test_write_member_of_simple_shape_literal() -> None:
-    stdout = compile_and_run_success(
-        """
-        main = fun():
-            foo = {name = "FAIL", age = 42}
-            foo.name = "PASS"
-            print(foo.name)
-        end
-    """
-    )
-    assert stdout == stripln("""
-        PASS
-    """)
-
-
-def test_write_member_of_nested_shape_literal() -> None:
-    stdout = compile_and_run_success(
-        """
-        main = fun():
-            foo = {value = {pass = "FAIL", age = 42}}
-            foo.value.pass = "PASS"
-            print(foo.value.pass)
-        end
-    """
-    )
-    assert stdout == stripln("""
-        PASS
-    """)

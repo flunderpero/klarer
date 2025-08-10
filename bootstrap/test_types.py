@@ -165,20 +165,6 @@ def test_fun_infer_from_assigning_shape_attr() -> None:
     )
 
 
-def test_fun_infer_from_assign_to_shape_attr() -> None:
-    tc = typecheck("""
-        f = fun(a):
-            a.value = 42
-        end
-    """)
-    assert tc.type_at(1, 1, ast.FunDef) == typ(
-        types.Fun,
-        name="f",
-        params=(types.Attr("a", typ(types.Shape, attrs=(types.Attr("value", types.IntTyp),))),),
-        result=types.UnitTyp,
-    )
-
-
 def test_fun_infer_from_beign_passed_to_fun() -> None:
     tc = typecheck("""
         f = fun(a):
@@ -330,16 +316,3 @@ def test_read_member() -> None:
         foo.name
     """)
     assert tc.type_at(2, 1, ast.Member) == types.StrTyp
-
-
-def test_write_member() -> None:
-    typecheck("""
-        foo = {name = "Peter", age = 42}
-        foo.name = "John"
-    """)
-
-    _, errors = typecheck_err("""
-        foo = {name = "Peter", age = 42}
-        foo.name = 42
-    """)
-    assert errors == ["`Int` is not the same shape as `Str`"]

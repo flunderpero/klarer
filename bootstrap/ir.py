@@ -390,15 +390,6 @@ class Scope:
             return self.parent.find(name)
         return None
 
-    def snapshot(self) -> dict[str, Reg]:
-        res = self.vars.copy()
-        if self.parent:
-            res.update(self.parent.snapshot())
-        return res
-
-    def deep_copy(self) -> Scope:
-        return Scope(self.parent.deep_copy() if self.parent else None, self.vars.copy())
-
 
 @dataclass
 class LoopScope:
@@ -535,36 +526,8 @@ class FunGen:
                     if node.nodes:
                         reg = self.node_regs[node.nodes[-1].id]
                     self.node_regs[node.id] = reg
-            case ast.Loop():
-                enter_scope_snapshot = self.scope.snapshot()
-                loop_block = self.new_block()
-                break_block = self.new_block()
-                self.loop_scopes.append(LoopScope(loop_block, break_block))
-                prev_block = self.block
-                self.block.terminator = Jump(loop_block)
-                self.block = loop_block
-                self.generate(node.block, node)
-                body_scope_snapshot = self.scope.snapshot()
-                # Insert phi nodes for every variable that has been changed in the loop body.
-                for name, enter_reg in enter_scope_snapshot.items():
-                    loop_reg = body_scope_snapshot[name]
-                    if enter_reg == loop_reg:
-                        continue
-                    reg = self.reg(enter_reg.typ)
-                    self.scope.update(name, reg)
-                    self.emit(Phi(reg, [PhiIn(enter_reg, prev_block), PhiIn(loop_reg, loop_block)]), None)
-                self.block.terminator = Jump(loop_block)
-                self.block = break_block
-                self.loop_scopes.pop()
-                self.node_regs[node.id] = NoneReg
             case ast.If():
                 log("ir-trace", f">>> if {node.span} ({len(node.arms)} arms, else: {node.else_block is not None})")
-                # Remember the current scope so we can emit phi nodes for every variable that
-                # escapes the `if` arms or every mutable variable accessed.
-                scope_copy = self.scope.deep_copy()
-                enter_scope_snapshot = self.scope.snapshot()
-                enter_block = self.block
-
                 # Add the else block to the list of arms to make the loop easier.
                 arms: list[tuple[ast.Expr | None, ast.Block, ast.Node]] = [(x.cond, x.block, x) for x in node.arms]
                 if node.else_block is not None:
@@ -573,7 +536,6 @@ class FunGen:
                 then_blocks = []
                 next_block = None
                 prev_block = self.block
-                scope_snapshots = []
                 for cond, block, arm_node in arms:
                     if cond is not None:
                         self.generate(cond, arm_node)
@@ -583,10 +545,7 @@ class FunGen:
                     self.block = then_block
                     then_blocks.append(then_block)
 
-                    # Restore the scope, generate the arm block, and take a snapshot of the scope.
-                    self.scope = scope_copy.deep_copy()
                     self.generate(block, arm_node)
-                    scope_snapshots.append(self.scope.snapshot())
 
                     # Create a new block that will take the condition of the next arm.
                     next_block = self.new_block()
@@ -603,23 +562,6 @@ class FunGen:
                 # Set the terminator of all the "then" blocks.
                 for then_block in then_blocks:
                     then_block.terminator = Jump(next_block)
-
-                # Restore the scope.
-                self.scope = scope_copy
-
-                # Insert phi nodes for every change of a mutable variable or new variable.
-                for name, enter_reg in enter_scope_snapshot.items():
-                    regs = [x[name] for x in scope_snapshots]
-                    phis = []
-                    for reg, block in zip(regs, then_blocks):
-                        if reg == enter_reg:
-                            continue
-                        phis.append(PhiIn(reg, block))
-                    if phis:
-                        phis.append(PhiIn(enter_reg, enter_block))
-                        reg = self.reg(enter_reg.typ)
-                        self.scope.update(name, reg)
-                        self.emit(Phi(reg, phis), None)
 
                 # Insert another phi node for the result of the whole if expression.
                 types_typ = self.type_env.get(node)
@@ -718,20 +660,11 @@ class FunGen:
                     self.emit(Call(reg, src, args), node)
             case ast.Assign():
                 ast.walk(node, self.generate)
+                reg = self.node_regs[node.value.id]
                 src = node.target
-                match src:
-                    case ast.Name():
-                        if not self.scope.find(src.name):
-                            self.scope.declare(src.name, self.node_regs[node.value.id])
-                        else:
-                            self.scope.update(src.name, self.node_regs[node.value.id])
-                    case ast.Member():
-                        reg = self.node_regs[src.id]
-                        value_reg = self.node_regs[node.value.id]
-                        self.emit(Store(reg, value_reg), node)
-                    case _:
-                        raise AssertionError(f"Unsupported target type: {src}")
-                self.node_regs[node.id] = NoneReg
+                if not self.scope.find(src.name):
+                    self.scope.declare(src.name, reg)
+                self.node_regs[node.id] = reg
             case ast.BinaryExpr():
                 ast.walk(node, self.generate)
                 lhs_reg = self.node_regs[node.lhs.id]

@@ -16,21 +16,6 @@ def test_happy_path() -> None:
     """)
 
 
-def test_mut_assign_shapes_with_different_attribute_order() -> None:
-    stdout = compile_and_run_success("""
-        main = fun():
-            mut x = {name = "PASS1", age = 42}
-            print(x.name)
-            x = {age = 24, name = "PASS2"}
-            print(x.name)
-        end
-    """)
-    assert stdout == stripln("""
-        PASS1
-        PASS2
-    """)
-
-
 def test_shape_literal_can_subsume_shape_alias() -> None:
     stdout = compile_and_run_success("""
         Value = {value {}}

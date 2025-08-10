@@ -315,15 +315,6 @@ class Parser:
                     raise AssertionError(f"Unexpected token kind: {end.kind}")
         return ast.If(self.id(), arms, else_block, self.input.span_merge(span))
 
-    def parse_loop(self) -> ast.Loop | None:
-        span = self.input.span()
-        if not self.expect(token.Kind.loop):
-            return None
-        block, _ = self.parse_block()
-        if not block:
-            return None
-        return ast.Loop(self.id(), block, self.input.span_merge(span))
-
     def parse_expr(self, min_precedence: int = 0) -> ast.Expr | None:
         lhs = self.parse_primary_expr()
         if not lhs:
@@ -476,7 +467,7 @@ class Parser:
                 nodes.append(node)
         return (ast.Block(self.id(), nodes, self.input.span_merge(span)), t)
 
-    def parse_assign(self, target: ast.Expr | None = None, *, mut: bool = False) -> ast.Assign | None:
+    def parse_assign(self, target: ast.Expr | None = None) -> ast.Assign | None:
         span = self.input.span()
         if target is None:
             target = self.parse_expr()
@@ -487,13 +478,11 @@ class Parser:
         value = self.parse_expr()
         if not value:
             return None
-        return ast.Assign(self.id(), target, value, self.input.span_merge(span), mut)
+        return ast.Assign(self.id(), target, value, self.input.span_merge(span))
 
     def parse_block_node(self) -> ast.Node | None:
         t = self.input.peek()
         match t.kind:
-            case token.Kind.loop:
-                return self.parse_loop()
             case token.Kind.type_ident:
                 match self.input.peek1().kind:
                     case token.Kind.curly_left:
@@ -502,9 +491,6 @@ class Parser:
                         return self.parse_shape_decl()
             case token.Kind.behaviour_ns:
                 return self.parse_behaviour_fun_def()
-            case token.Kind.mut:
-                self.input.next()
-                return self.parse_assign(None, mut=True)
             case _:
                 expr = self.parse_expr()
                 if not expr:

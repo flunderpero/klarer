@@ -192,11 +192,9 @@ class Assign:
     target: Expr
     value: Expr
     span: Span
-    mut: bool
 
     def __str__(self) -> str:
-        mut = "mut " if self.mut else ""
-        return nid(self.id) + f"{mut}{self.target} = {self.value}"
+        return nid(self.id) + f"{self.target} = {self.value}"
 
 
 @dataclass
@@ -322,7 +320,7 @@ class Module:
 
 Shape = ShapeRef | FunShape | ProductShape | ProductShapeComp | SumShape
 Expr = BinaryExpr | Block | BoolLit | Call | CharLit | If | IntLit | Member | Name | StrLit | ShapeLit
-Node = Assign | Expr | FunDef | Module | Loop | Shape | Attr | ShapeDecl | ShapeLitAttr | IfArm | FunParam
+Node = Assign | Expr | FunDef | Module | Shape | Attr | ShapeDecl | ShapeLitAttr | IfArm | FunParam
 
 ASTVisitor = Callable[[Node, Node | None], Node]
 

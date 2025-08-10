@@ -16,7 +16,7 @@ def test_token() -> None:
 
     42 "hello" 'c' true false
 
-    mut x = 42
+    x = 42
     """,
         )
     )
@@ -49,7 +49,6 @@ def test_token() -> None:
         (token.Kind.char_lit, "c"),
         (token.Kind.true, None),
         (token.Kind.false, None),
-        (token.Kind.mut, None),
         (token.Kind.ident, "x"),
         (token.Kind.eq, None),
         (token.Kind.int_lit, "42"),

@@ -121,7 +121,7 @@ def test_product_shape_composition_preceeds_sum_shape() -> None:
 
 
 def test_shape_behaviour() -> None:
-    decl = parse_first("Foo = Bar | Baz bind @Foo + @Baz")
+    decl = parse_first("Foo = Bar | Baz + @Foo + @Baz")
     assert isinstance(decl, ast.ShapeDecl)
     assert decl.behaviours == ["Foo", "Baz"]
     assert decl.shape == node(ast.SumShape, variants=[node(ast.ShapeRef, name="Bar"), node(ast.ShapeRef, name="Baz")])
@@ -134,6 +134,14 @@ def test_shape_literal() -> None:
     assert parse_first("Foo{a = 42}") == node(
         ast.ShapeLit,
         shape_ref=node(ast.ShapeRef, name="Foo"),
+        attrs=[node(ast.ShapeLitAttr, name="a", value=node(ast.IntLit, value=42))],
+    )
+
+
+def test_shape_literal_with_behaviour() -> None:
+    assert parse_first("{a = 42} + @Foo") == node(
+        ast.ShapeLit,
+        behaviours=["Foo"],
         attrs=[node(ast.ShapeLitAttr, name="a", value=node(ast.IntLit, value=42))],
     )
 
@@ -219,6 +227,16 @@ def test_call() -> None:
 def test_block() -> None:
     assert parse_first(": end") == node(ast.Block, nodes=[])
     assert parse_first(": 42 end") == node(ast.Block, nodes=[node(ast.IntLit, value=42)])
+
+
+def test_behaviour_fun_def() -> None:
+    assert parse_first("@Foo.bar = fun(foo): end") == node(
+        ast.FunDef,
+        name="bar",
+        namespace="Foo",
+        params=[node(ast.FunParam, name="foo")],
+        body=node(ast.Block, nodes=[]),
+    )
 
 
 def parse_shape_decl(code: str, expected_name: str) -> ast.Shape:

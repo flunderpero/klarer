@@ -621,21 +621,30 @@ class FunGen:
                 types_src = self.type_env.get(node.target)
                 assert isinstance(src.typ, Struct), f"Expected Struct, got {src.typ}"
                 assert isinstance(types_src.typ, types.Shape), f"Expected Shape, got {types_src}"
-                attr_index = types_src.typ.attrs_sorted.index(types_src.typ.attr(node.name))
-                assert attr_index is not None, f"No member {node.name} in type {types_src}"
-                getptr_reg = self.reg(Ptr(src.typ.fields[attr_index]))
-                if isinstance(parent, ast.Assign):
-                    self.emit(GetPtr(getptr_reg, src, attr_index), node)
-                else:
-                    self.emit(GetPtr(getptr_reg, src, attr_index), None)
-                    reg = self.reg(src.typ.fields[attr_index])
-                    self.emit(Load(reg, getptr_reg), node)
+                attr = types_src.typ.attr(node.name)
+                if attr is not None:
+                    attr_index = types_src.typ.attrs_sorted.index(attr)
+                    assert attr_index is not None, f"No member {node.name} in type {types_src}"
+                    getptr_reg = self.reg(Ptr(src.typ.fields[attr_index]))
+                    if isinstance(parent, ast.Assign):
+                        self.emit(GetPtr(getptr_reg, src, attr_index), node)
+                    else:
+                        self.emit(GetPtr(getptr_reg, src, attr_index), None)
+                        reg = self.reg(src.typ.fields[attr_index])
+                        self.emit(Load(reg, getptr_reg), node)
+                # If it's not an attribute, it has to be a behaviour function.
+                # todo: emit a GetFnPtr if `parent` isn't ast.Call.
             case ast.Call():
                 callee = self.type_env.get(node.callee)
                 assert isinstance(callee.typ, types.Fun), f"Expected Fun, got {callee}"
                 fun = callee.typ
                 ast.walk(node, self.generate)
                 args = [self.node_regs[x.id] for x in node.args]
+                if fun.namespace:
+                    # This is a behaviour function call, prepend the receiver to the args.
+                    assert isinstance(node.callee, ast.Member), f"Expected Member, got {node.callee}"
+                    receiver = self.node_regs[node.callee.target.id]
+                    args = [receiver, *args]
                 if fun.is_named:
                     # Direct call by name.
                     reg = self.reg(self.typ(fun.result))

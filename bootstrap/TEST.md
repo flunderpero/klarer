@@ -195,3 +195,39 @@ end
 PASS
 PASS
 ```
+
+## Behaviour
+
+```klarer
+@Value.print_value = fun(v):
+    print(v.value)
+end
+
+main = fun():
+    v = {value = "PASS"} + @Value
+    v.print_value()
+end
+```
+
+```
+PASS
+```
+
+**A shape literal should receive the behaviours of a shape alias**
+
+```klarer
+@Value.print_value = fun(v):
+    print(v.value)
+end
+
+Value = {value {}} + @Value
+
+main = fun():
+    v = Value{value = "PASS"}
+    v.print_value()
+end
+```
+
+```
+PASS
+```

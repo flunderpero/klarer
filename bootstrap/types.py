@@ -20,11 +20,17 @@ class Behaviour:
     def __str__(self) -> str:
         return f"@{self.name}"
 
-    def is_same(self, other: object) -> bool:
-        return isinstance(other, Behaviour) and self.name == other.name
+    def is_same(self, other: Behaviour) -> bool:
+        return self.name == other.name
 
     def mangled_name(self) -> str:
         return self.name
+
+    def fun(self, name: str) -> Fun | None:
+        for fun in self.funs:
+            if fun.name == name:
+                return fun
+        return None
 
 
 @dataclass(eq=True, frozen=True)
@@ -34,19 +40,19 @@ class Primitive:
     span: Span = field(compare=False, hash=False)
 
     def __str__(self) -> str:
-        behaviours = " bind " + " + ".join(str(x) for x in self.behaviours) if self.behaviours else ""
+        behaviours = " + " + " + ".join(str(x) for x in self.behaviours) if self.behaviours else ""
         return f"{self.name}{behaviours}"
 
-    def is_same(self, other: object) -> bool:
+    def is_same(self, other: Shapes) -> bool:
         return isinstance(other, Primitive) and self.name == other.name
 
     def mangled_name(self) -> str:
         return self.name
 
-    def conforms_to(self, other: Typ) -> bool:
-        # For now, all primitives only conform to themselves. Later on, when we have different
-        # sized integers, I8 will conform to I16, etc.
-        return self == other
+    def conforms_to(self, other: Shapes) -> bool:
+        # For now, all primitives only conform to themselves or the empty shape.
+        # Later on, when we have different sized integers, I8 will conform to I16, etc.
+        return self == other or (isinstance(other, Shape) and other.is_empty())
 
 
 @dataclass(eq=True, frozen=True)
@@ -57,14 +63,14 @@ class Attr:
     def __str__(self) -> str:
         return self.name + " " + str(self.typ)
 
-    def is_same(self, other: object) -> bool:
-        return isinstance(other, Attr) and self.name == other.name and self.typ == other.typ
+    def is_same(self, other: Attr) -> bool:
+        return self.name == other.name and self.typ == other.typ
 
     def mangled_name(self) -> str:
         return self.name + "_" + self.typ.mangled_name()
 
-    def conforms_to(self, other: Typ) -> bool:
-        return isinstance(other, Attr) and self.name == other.name and self.typ.conforms_to(other.typ)
+    def conforms_to(self, other: Attr) -> bool:
+        return self.name == other.name and self.typ.conforms_to(other.typ)
 
 
 def same_tuple(a: tuple[Any, ...], b: tuple[Any, ...]) -> bool:
@@ -95,12 +101,12 @@ class Shape:
 
     def __str__(self) -> str:
         variants = " | " + " | ".join(str(x) for x in self.variants) if self.variants else ""
-        behaviours = " bind " + " + ".join(str(x) for x in self.behaviours) if self.behaviours else ""
+        behaviours = " + " + " + ".join(str(x) for x in self.behaviours) if self.behaviours else ""
         name = f" {self.name}" if self.name else ""
         attrs = ", ".join(str(x) for x in self.attrs)
         return f"{name}{{{attrs}}}{variants}{behaviours}"
 
-    def is_same(self, other: object) -> bool:
+    def is_same(self, other: Shapes) -> bool:
         return (
             isinstance(other, Shape)
             and same_tuple(self.attrs, other.attrs)
@@ -124,7 +130,7 @@ class Shape:
     def is_empty(self) -> bool:
         return not self.attrs and not self.variants and not self.behaviours
 
-    def conforms_to(self, other: Typ) -> bool:
+    def conforms_to(self, other: Shapes) -> bool:
         """A shape conforms the other shape if it has at least all the
         attributes, variants, and behaviours of the other shape.
 
@@ -135,21 +141,17 @@ class Shape:
         - {} conforms any shape, function, or primitive
 
         """
-        if not isinstance(other, (Shape, Primitive, Fun)):
-            return False
-        if self.is_empty():
-            return True  # {} conforms to everything
         if not isinstance(other, Shape):
             return False
 
         # All attributes of `other` must be present in `self`.
         for attr in other.attrs:
-            if not any(x.typ.conforms_to(attr.typ) for x in self.attrs):
+            if not any(x.conforms_to(attr) for x in self.attrs):
                 return False  # Other is missing a required attribute
 
         # All variants of `other` must be present in `self`.
         for variant in other.variants:
-            if not any(x.typ.conforms_to(variant.typ) for x in self.variants):
+            if not any(x.conforms_to(variant) for x in self.variants):
                 return False
 
         # All behaviours of `other` must be present in `self`.
@@ -160,7 +162,8 @@ class Shape:
         return True
 
     def merge(self, other: Shape) -> Shape:
-        attrs: list[Attr] = []
+        attrs = []
+        behaviours = [*self.behaviours]
         for other_attr in other.attrs:
             self_attr = self.attr(other_attr.name)
             if self_attr is not None:
@@ -169,7 +172,10 @@ class Shape:
                 attrs.append(Attr(other_attr.name, t))
             else:
                 attrs.append(other_attr)
-        return Shape(self.name, tuple(attrs), self.variants, self.behaviours, self.span)
+        for other_behaviour in other.behaviours:
+            if other_behaviour not in behaviours:
+                behaviours.append(other_behaviour)
+        return Shape(self.name, tuple(attrs), self.variants, tuple(behaviours), self.span)
 
 
 @dataclass(eq=True, frozen=True)
@@ -177,6 +183,7 @@ class Fun:
     name: str | None
     params: tuple[Attr, ...]
     result: Typ
+    namespace: str | None
     span: Span = field(compare=False, hash=False)
     builtin: bool
 
@@ -187,9 +194,10 @@ class Fun:
     def __str__(self) -> str:
         params = ", ".join(str(x) for x in self.params)
         name = f" {self.name}" if self.name else ""
+        name = f" @{self.namespace}.{name[1:]}" if self.namespace else name
         return f"fun{name}({params}) -> {self.result}"
 
-    def is_same(self, other: object) -> bool:
+    def is_same(self, other: Shapes) -> bool:
         return isinstance(other, Fun) and self.params == other.params and self.result == other.result
 
     def mangled_name(self) -> str:
@@ -197,18 +205,23 @@ class Fun:
             assert self.name is not None
             return self.name
         params = [x.mangled_name() for x in [*self.params, self.result]]
+        name = ""
         if self.name:
-            return self.name + "_" + "_".join(params)
-        return "_".join(params)
+            name = self.name + "__"
+        if self.namespace:
+            name = self.namespace + "__" + name
+        return name + "_".join(params)
 
-    def conforms_to(self, other: Any) -> bool:
-        """A function conforms the other function if all its parameters and
-        result conform the other function's parameters and result.
+    def conforms_to(self, other: Shapes) -> bool:
+        """A function conforms the empty shape or another function if all
+        its parameters and result conform the other function's parameters and result.
 
         Examples:
         - fun(a {name Str}) conforms to fun(a {})
 
         """
+        if isinstance(other, Shape) and other.is_empty():
+            return True
         if not isinstance(other, Fun):
             return False
         if len(self.params) != len(other.params):
@@ -216,7 +229,7 @@ class Fun:
         if not self.result.conforms_to(other.result):
             return False
         for param, other_param in zip(self.params, other.params):  # noqa: SIM110
-            if not param.typ.conforms_to(other_param.typ):
+            if not param.conforms_to(other_param):
                 return False
         return True
 
@@ -284,6 +297,8 @@ IntTyp = Typ(Primitive("Int", (), builtin_span), origin_trail=[])
 StrTyp = Typ(Primitive("Str", (), builtin_span), origin_trail=[])
 UnitTyp = Typ(Primitive("Unit", (), builtin_span), origin_trail=[])
 
+Shapes = Shape | Fun | Primitive
+
 
 @dataclass
 class TypeEnv:
@@ -329,21 +344,22 @@ class Scope:
         span = Span("<builtin>", "", 0, 0)
         binding_defaults = {"builtin": True, "is_fun_param": False}
         typ_defaults = {"origin_trail": []}
+        fun_defaults = {"namespace": None, "span": span, "builtin": True}
         scope = Scope(None, None, {})
         scope.bindings["print"] = Binding(
-            Typ(Fun("print", (Attr("s", StrTyp),), UnitTyp, span=span, builtin=True), **typ_defaults),
+            Typ(Fun("print", (Attr("s", StrTyp),), UnitTyp, **fun_defaults), **typ_defaults),
             **binding_defaults,
         )
         scope.bindings["int_to_str"] = Binding(
-            Typ(Fun("int_to_str", (Attr("i", IntTyp),), StrTyp, span=span, builtin=True), **typ_defaults),
+            Typ(Fun("int_to_str", (Attr("i", IntTyp),), StrTyp, **fun_defaults), **typ_defaults),
             **binding_defaults,
         )
         scope.bindings["char_to_str"] = Binding(
-            Typ(Fun("char_to_str", (Attr("c", CharTyp),), StrTyp, span=span, builtin=True), **typ_defaults),
+            Typ(Fun("char_to_str", (Attr("c", CharTyp),), StrTyp, **fun_defaults), **typ_defaults),
             **binding_defaults,
         )
         scope.bindings["bool_to_str"] = Binding(
-            Typ(Fun("bool_to_str", (Attr("b", BoolTyp),), StrTyp, span=span, builtin=True), **typ_defaults),
+            Typ(Fun("bool_to_str", (Attr("b", BoolTyp),), StrTyp, **fun_defaults), **typ_defaults),
             **binding_defaults,
         )
         scope.bindings["Int"] = Binding(IntTyp, **binding_defaults)
@@ -402,6 +418,7 @@ class TypeCheck:
     scope: Scope
     fun_specs: dict[Fun, list[FunSpec]]
     fun_defs: dict[Fun, ast.FunDef]
+    behaviours: dict[str, Behaviour]
     nesting_level = 0
 
     def __init__(self) -> None:
@@ -410,6 +427,7 @@ class TypeCheck:
         self.scope = Scope.root()
         self.fun_specs = {}
         self.fun_defs = {}
+        self.behaviours = {}
         for name, fun in (x for x in inspect.getmembers(self, inspect.ismethod) if x[0].startswith("tc_")):
 
             def make_wrapper(fun: Callable) -> Any:
@@ -444,12 +462,16 @@ class TypeCheck:
             log("typechecker-mono", f">>> Specializing {fun} at call-site {span}", self.nesting_level)
 
             base = self.type_env.get(fun_def)
-            params = (*(Attr(attr.name, self.type_env.get(arg)) for attr, arg in zip(fun.params, call_args)),)
-            specialized = Fun(fun.name, params, base.typ.result, fun.span, builtin=fun.builtin)
+            params: list[Attr] = []
+            for param, arg in zip(fun.params, call_args):
+                typ = self.type_env.get(arg)
+                self.merge_fun_param(typ, param.typ)
+                params.append(Attr(param.name, typ))
+            specialized = Fun(fun.name, tuple(params), base.typ.result, fun.namespace, fun.span, builtin=fun.builtin)
 
             spec = FunSpec(self.type_env, fun_def, base.typ, specialized)
 
-            if not spec.base.conforms_to(spec.specialized):
+            if not spec.specialized.conforms_to(spec.base):
                 return self.error(error.does_not_conform_to(str(spec.specialized), str(spec.base), span)).typ
 
             log(
@@ -549,7 +571,18 @@ class TypeCheck:
                 if fun is not None and fun.is_fun_param:
                     args = tuple(Attr(f"${i}", self.type_env.get(arg)) for i, arg in enumerate(node.args))
                     self.merge_fun_param(
-                        callee, Typ(Fun(node.callee.name, args, callee.typ, node.callee.span, builtin=False), [])
+                        callee,
+                        Typ(
+                            Fun(
+                                node.callee.name,
+                                args,
+                                callee.typ,
+                                None,
+                                node.callee.span,
+                                builtin=False,
+                            ),
+                            [],
+                        ),
                     )
             if not isinstance(callee.typ, Fun):
                 return self.error(error.not_callable(node.callee.span, callee.span))
@@ -559,7 +592,12 @@ class TypeCheck:
         if callee.typ.builtin:
             return callee.typ.result
 
-        spec = self.specialize(callee.typ, node.args, node.span)
+        args = node.args
+        if callee.typ.namespace:
+            assert isinstance(node.callee, ast.Member), f"Expected Member, got {node.callee}"
+            args = [node.callee.target, *args]
+
+        spec = self.specialize(callee.typ, args, node.span)
         if isinstance(spec, error.Error):
             return Typ(error.cascaded_error(spec, node.span), [])
         self.type_env.set(node.callee, Typ(spec.specialized, origin_trail=[node]))
@@ -580,7 +618,7 @@ class TypeCheck:
                 params.append(Attr(param.name, param_typ))
             self.visit(node.body, node)
         return_typ = self.type_env.get(node.body)
-        typ = Typ(Fun(node.name, (*params,), return_typ, node.span, builtin=False), origin_trail=[node])
+        typ = Typ(Fun(node.name, (*params,), return_typ, node.namespace, node.span, builtin=False), origin_trail=[node])
         log("typechecker-trace", f"Adding {typ.typ} to fun_defs", self.nesting_level)
         self.fun_defs[typ.typ] = node
         if err := self.scope.bind(node.name, typ):
@@ -593,6 +631,13 @@ class TypeCheck:
                     return Typ(error.cascaded_error(fun.result.typ, node.span), [])
                 return self.error(error.invalid_main(node.span))
             self.fun_specs[fun] = [FunSpec(self.type_env, node, fun, fun)]
+        if node.namespace:
+            behaviour = self.behaviours.get(node.namespace)
+            behaviour_funs = []
+            if behaviour:
+                behaviour_funs = list(behaviour.funs)
+            behaviour_funs.append(typ.typ)
+            self.behaviours[node.namespace] = Behaviour(node.namespace, tuple(behaviour_funs))
         return typ
 
     def tc_fun_def_specialized(self, node: ast.FunDef, fun: Fun) -> Typ:
@@ -683,13 +728,25 @@ class TypeCheck:
         # Ensure that if we reference a function parameter, its shape also
         # contains this member access.
         self.merge_fun_param(typ, None)
+        behaviour_fun = None
+        if isinstance(typ.typ, (Shape, Primitive)):
+            for behaviour in typ.typ.behaviours:
+                behaviour_fun = behaviour.fun(node.name)
+                if behaviour_fun:
+                    break
+        if isinstance(typ.typ, Primitive):
+            if behaviour_fun is None:
+                return self.error(error.no_member(node.name, str(typ.typ), node.target.span, node.span))
+            return Typ(behaviour_fun, [])
         shape = typ.typ
         if not isinstance(shape, Shape):
             return self.error(error.unexpected_shape(f"a shape with field `{node.name}`", str(shape), node.target.span))
         attr = shape.attr(node.name)
-        if not attr:
-            return self.error(error.no_member(node.name, str(shape), node.target.span, node.span))
-        return attr.typ
+        if attr:
+            return attr.typ
+        if behaviour_fun:
+            return Typ(behaviour_fun, [])
+        return self.error(error.no_member(node.name, str(shape), node.target.span, node.span))
 
     def tc_module(self, node: ast.Module) -> Typ:
         ast.walk(node, self.visit)
@@ -719,13 +776,23 @@ class TypeCheck:
             if typ.is_error():
                 return typ
             attrs.append(Attr(attr.name, typ))
-        typ = Typ(Shape(None, tuple(attrs), (), (), node.span), origin_trail=[node])
+        behaviours = []
+        ref = None
         if node.shape_ref:
-            expected_shape = self.scope.lookup(node.shape_ref.name)
-            if expected_shape is None:
+            ref = self.scope.lookup(node.shape_ref.name)
+            if ref is None:
                 return self.error(error.undefined_name(node.shape_ref.name, node.shape_ref.span))
-            if not typ.conforms_to(expected_shape.typ):
-                return self.error(error.does_not_conform_to(str(typ.typ), node.shape_ref.name, node.shape_ref.span))
+            if isinstance(ref.typ.typ, Shape):
+                behaviours.extend(ref.typ.typ.behaviours)
+        for name in node.behaviours:
+            behaviour = self.behaviours.get(name)
+            if not behaviour:
+                return self.error(error.undefined_name(name, node.span))
+            behaviours.append(behaviour)
+        typ = Typ(Shape(None, tuple(attrs), (), tuple(behaviours), node.span), origin_trail=[node])
+        if ref and not typ.conforms_to(ref.typ):
+            assert node.shape_ref
+            return self.error(error.does_not_conform_to(str(typ.typ), node.shape_ref.name, node.shape_ref.span))
         return typ
 
     def tc_shape_literal_attr(self, node: ast.ShapeLitAttr) -> Typ:
@@ -740,6 +807,13 @@ class TypeCheck:
         typ = self.type_env.get(node.shape)
         if typ.is_error():
             return typ
+        behaviours = []
+        for name in node.behaviours:
+            behaviour = self.behaviours.get(name)
+            if not behaviour:
+                return self.error(error.undefined_name(name, node.span))
+            behaviours.append(behaviour)
+        typ.typ = replace(typ.typ, behaviours=tuple(behaviours))
         if err := self.scope.bind(node.name, typ):
             return self.error(err)
         return UnitTyp

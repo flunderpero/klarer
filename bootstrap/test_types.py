@@ -72,13 +72,9 @@ def test_assign_shape_literal_must_conform() -> None:
 
 def test_fun() -> None:
     tc = typecheck(""" f = fun(): 42 end """)
-    assert tc.type_at(1, 1, ast.FunDef) == types.Typ(
-        types.Fun("f", (), types.IntTyp, types.builtin_span, builtin=False), []
-    )
+    assert tc.type_at(1, 1, ast.FunDef) == typ(types.Fun, name="f", params=(), result=types.IntTyp)
     tc = typecheck(""" main = fun(): end """)
-    assert tc.type_at(1, 1, ast.FunDef) == types.Typ(
-        types.Fun("main", (), types.UnitTyp, types.builtin_span, builtin=False), []
-    )
+    assert tc.type_at(1, 1, ast.FunDef) == typ(types.Fun, name="main", params=(), result=types.UnitTyp)
 
 
 def test_fun_infer_from_member() -> None:
@@ -115,8 +111,11 @@ def test_fun_infer_from_member() -> None:
 
 def test_fun_infer_from_binop() -> None:
     tc = typecheck(""" f = fun(a): a == 42 end """)
-    assert tc.type_at(1, 1, ast.FunDef) == types.Typ(
-        types.Fun("f", (types.Attr("a", types.IntTyp),), types.BoolTyp, types.builtin_span, builtin=False), []
+    assert tc.type_at(1, 1, ast.FunDef) == typ(
+        types.Fun,
+        name="f",
+        params=(types.Attr("a", types.IntTyp),),
+        result=types.BoolTyp,
     )
 
 
@@ -316,3 +315,37 @@ def test_read_member() -> None:
         foo.name
     """)
     assert tc.type_at(2, 1, ast.Member) == types.StrTyp
+
+
+def test_behaviour() -> None:
+    tc = typecheck("""
+        @Value.print_value = fun(v):
+            print(v.value)
+        end
+
+        v = {value = "PASS"} + @Value
+        v.print_value()
+    """)
+    assert tc.type_at(1, 1, ast.FunDef) == typ(
+        types.Fun,
+        name="print_value",
+        namespace="Value",
+        params=(
+            types.Attr("v", typ(types.Shape, attrs=(types.Attr("value", empty_shape()),), variants=(), behaviours=())),
+        ),
+        result=types.UnitTyp,
+    )
+    assert str(tc.type_at(6, 1, ast.Member)) == str(
+        typ(
+            types.Fun,
+            name="print_value",
+            namespace="Value",
+            params=(
+                types.Attr(
+                    "v",
+                    typ(types.Shape, attrs=(types.Attr("value", types.StrTyp),), variants=(), behaviours=("@Value",)),
+                ),
+            ),
+            result=types.UnitTyp,
+        )
+    )

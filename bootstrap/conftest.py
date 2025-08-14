@@ -96,7 +96,7 @@ def node(kind: Callable, **kwargs: Any) -> ast.Node:
         case ast.Name:
             defaults.update({"kind": "ident"})
         case ast.ShapeLit:
-            defaults.update({"shape_ref": None})
+            defaults.update({"shape_ref": None, "behaviours": []})
         case ast.ShapeDecl:
             defaults.update({"behaviours": []})
     return kind(**defaults | kwargs)
@@ -108,7 +108,7 @@ def typ(kind: Callable, **kwargs: Any) -> types.Typ:
         case types.Shape:
             defaults.update({"name": None, "attrs": (), "variants": (), "behaviours": ()})
         case types.Fun:
-            defaults.update({"name": None, "builtin": False})
+            defaults.update({"name": None, "builtin": False, "namespace": None})
     return types.Typ(kind(**defaults | kwargs), [])
 
 

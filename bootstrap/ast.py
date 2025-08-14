@@ -111,12 +111,14 @@ class ShapeLitAttr:
 class ShapeLit:
     id: NodeId
     shape_ref: ShapeRef | None
+    behaviours: list[str]
     attrs: list[ShapeLitAttr]
     span: Span
 
     def __str__(self) -> str:
         shape_ref = f"{self.shape_ref}." if self.shape_ref else ""
-        return nid(self.id) + f"{shape_ref}{{{', '.join(str(x) for x in self.attrs)}}}"
+        behaviours = " + " + " + ".join(f"@{x}" for x in self.behaviours) if self.behaviours else ""
+        return nid(self.id) + f"{shape_ref}{{{', '.join(str(x) for x in self.attrs)}}}{behaviours}"
 
 
 @dataclass

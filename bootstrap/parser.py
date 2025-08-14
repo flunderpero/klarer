@@ -137,7 +137,7 @@ class Parser:
         if not shape:
             return None
         behaviours: list[str] = []
-        if self.input.peek().kind == token.Kind.bind:
+        if self.input.peek().kind == token.Kind.plus:
             while True:
                 self.input.next()
                 behaviour = self.expect_behaviour_ns()
@@ -184,7 +184,7 @@ class Parser:
                 return None
         if not shape:
             return None
-        if self.input.peek().kind == token.Kind.plus:
+        if self.input.peek().kind == token.Kind.plus and self.input.peek1().kind != token.Kind.behaviour_ns:
             self.input.next()
             rhs = self.parse_primary_shape()
             if not rhs:
@@ -427,7 +427,14 @@ class Parser:
                 self.input.next()
         if not self.expect(token.Kind.curly_right):
             return None
-        return ast.ShapeLit(self.id(), shape_ref, attrs, self.input.span_merge(span))
+        behaviours: list[str] = []
+        while self.input.peek().kind == token.Kind.plus:
+            self.input.next()
+            behaviour = self.expect_behaviour_ns()
+            if not behaviour:
+                return None
+            behaviours.append(behaviour)
+        return ast.ShapeLit(self.id(), shape_ref, behaviours, attrs, self.input.span_merge(span))
 
     def parse_call(self, callee: ast.Expr) -> ast.Expr | None:
         span = self.input.span()

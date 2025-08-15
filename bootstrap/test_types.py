@@ -13,10 +13,10 @@ def test_literals() -> None:
         'c'
         "hello"
     """)
-    assert tc.type_at(1, 1, ast.IntLit) == types.IntTyp
-    assert tc.type_at(2, 1, ast.BoolLit) == types.BoolTyp
-    assert tc.type_at(3, 1, ast.CharLit) == types.CharTyp
-    assert tc.type_at(4, 1, ast.StrLit) == types.StrTyp
+    assert tc.type_at(1, 1, ast.IntLit) == types.IntShape
+    assert tc.type_at(2, 1, ast.BoolLit) == types.BoolShape
+    assert tc.type_at(3, 1, ast.CharLit) == types.CharShape
+    assert tc.type_at(4, 1, ast.StrLit) == types.StrShape
 
 
 def test_block() -> None:
@@ -26,7 +26,7 @@ def test_block() -> None:
             42
         end
     """)
-    assert tc.type_at(1, 1, ast.Block) == types.IntTyp
+    assert tc.type_at(1, 1, ast.Block) == types.IntShape
 
 
 def test_assign() -> None:
@@ -34,8 +34,8 @@ def test_assign() -> None:
         a = 42
         a
     """)
-    assert tc.type_at(1, 1, ast.Assign) == types.UnitTyp
-    assert tc.type_at(2, 1, ast.Name) == types.IntTyp
+    assert tc.type_at(1, 1, ast.Assign) == types.UnitShape
+    assert tc.type_at(2, 1, ast.Name) == types.IntShape
 
 
 @pytest.mark.skip
@@ -72,9 +72,9 @@ def test_assign_shape_literal_must_conform() -> None:
 
 def test_fun() -> None:
     tc = typecheck(""" f = fun(): 42 end """)
-    assert tc.type_at(1, 1, ast.FunDef) == typ(types.Fun, name="f", params=(), result=types.IntTyp)
+    assert tc.type_at(1, 1, ast.FunDef) == typ(types.FunShape, name="f", params=(), result=types.IntShape)
     tc = typecheck(""" main = fun(): end """)
-    assert tc.type_at(1, 1, ast.FunDef) == typ(types.Fun, name="main", params=(), result=types.UnitTyp)
+    assert tc.type_at(1, 1, ast.FunDef) == typ(types.FunShape, name="main", params=(), result=types.UnitShape)
 
 
 def test_fun_infer_from_member() -> None:
@@ -86,19 +86,19 @@ def test_fun_infer_from_member() -> None:
             end """
     )
     assert tc.type_at(1, 1, ast.FunDef) == typ(
-        types.Fun,
+        types.FunShape,
         name="f",
         params=(
             types.Attr(
                 "a",
                 typ(
-                    types.Shape,
+                    types.ProductShape,
                     attrs=(types.Attr("value", empty_shape()),),
                 ),
             ),
         ),
         result=typ(
-            types.Shape,
+            types.ProductShape,
             attrs=(
                 types.Attr(
                     "value",
@@ -112,10 +112,10 @@ def test_fun_infer_from_member() -> None:
 def test_fun_infer_from_binop() -> None:
     tc = typecheck(""" f = fun(a): a == 42 end """)
     assert tc.type_at(1, 1, ast.FunDef) == typ(
-        types.Fun,
+        types.FunShape,
         name="f",
-        params=(types.Attr("a", types.IntTyp),),
-        result=types.BoolTyp,
+        params=(types.Attr("a", types.IntShape),),
+        result=types.BoolShape,
     )
 
 
@@ -126,14 +126,14 @@ def test_fun_infer_from_accessing_member_of_shape() -> None:
         end
     """)
     assert tc.type_at(1, 1, ast.FunDef) == typ(
-        types.Fun,
+        types.FunShape,
         name="f",
         params=(
             types.Attr(
                 "a",
                 typ(
-                    types.Shape,
-                    attrs=(types.Attr("value", typ(types.Shape, attrs=(types.Attr("nested", empty_shape()),))),),
+                    types.ProductShape,
+                    attrs=(types.Attr("value", typ(types.ProductShape, attrs=(types.Attr("nested", empty_shape()),))),),
                 ),
             ),
         ),
@@ -149,14 +149,14 @@ def test_fun_infer_from_assigning_shape_attr() -> None:
         end
     """)
     assert tc.type_at(1, 1, ast.FunDef) == typ(
-        types.Fun,
+        types.FunShape,
         name="f",
         params=(
             types.Attr(
                 "a",
                 typ(
-                    types.Shape,
-                    attrs=(types.Attr("value", typ(types.Shape, attrs=(types.Attr("nested", empty_shape()),))),),
+                    types.ProductShape,
+                    attrs=(types.Attr("value", typ(types.ProductShape, attrs=(types.Attr("nested", empty_shape()),))),),
                 ),
             ),
         ),
@@ -175,15 +175,15 @@ def test_fun_infer_from_beign_passed_to_fun() -> None:
         end
     """)
     assert tc.type_at(1, 1, ast.FunDef) == typ(
-        types.Fun,
+        types.FunShape,
         name="f",
-        params=(types.Attr("a", typ(types.Shape, attrs=(types.Attr("value", empty_shape()),))),),
+        params=(types.Attr("a", typ(types.ProductShape, attrs=(types.Attr("value", empty_shape()),))),),
         result=empty_shape(),
     )
     assert tc.type_at(5, 1, ast.FunDef) == typ(
-        types.Fun,
+        types.FunShape,
         name="g",
-        params=(types.Attr("a", typ(types.Shape, attrs=(types.Attr("value", empty_shape()),))),),
+        params=(types.Attr("a", typ(types.ProductShape, attrs=(types.Attr("value", empty_shape()),))),),
         result=empty_shape(),
     )
 
@@ -196,15 +196,15 @@ def test_fun_infer_from_being_called() -> None:
     """)
     assert str(tc.type_at(1, 1, ast.FunDef)) == str(
         typ(
-            types.Fun,
+            types.FunShape,
             name="f",
             params=(
                 types.Attr(
                     "g",
                     typ(
-                        types.Fun,
+                        types.FunShape,
                         name="g",
-                        params=(types.Attr("$0", types.IntTyp), types.Attr("$1", types.StrTyp)),
+                        params=(types.Attr("$0", types.IntShape), types.Attr("$1", types.StrShape)),
                         result=empty_shape(),
                     ),
                 ),
@@ -219,7 +219,7 @@ def test_call_without_params() -> None:
         f = fun(): 42 end
         f()
     """)
-    assert tc.type_at(2, 1, ast.Call) == types.IntTyp
+    assert tc.type_at(2, 1, ast.Call) == types.IntShape
 
 
 def test_call_specialization() -> None:
@@ -230,19 +230,19 @@ def test_call_specialization() -> None:
         f("hello")
     """)
     assert tc.type_at(2, 1, ast.Name) == typ(
-        types.Fun, name="f", params=(types.Attr("a", types.IntTyp),), result=types.IntTyp
+        types.FunShape, name="f", params=(types.Attr("a", types.IntShape),), result=types.IntShape
     )
-    assert tc.type_at(2, 1, ast.Call) == types.IntTyp
+    assert tc.type_at(2, 1, ast.Call) == types.IntShape
 
     assert tc.type_at(3, 1, ast.Name) == typ(
-        types.Fun, name="f", params=(types.Attr("a", types.BoolTyp),), result=types.BoolTyp
+        types.FunShape, name="f", params=(types.Attr("a", types.BoolShape),), result=types.BoolShape
     )
-    assert tc.type_at(3, 1, ast.Call) == types.BoolTyp
+    assert tc.type_at(3, 1, ast.Call) == types.BoolShape
 
     assert tc.type_at(4, 1, ast.Name) == typ(
-        types.Fun, name="f", params=(types.Attr("a", types.StrTyp),), result=types.StrTyp
+        types.FunShape, name="f", params=(types.Attr("a", types.StrShape),), result=types.StrShape
     )
-    assert tc.type_at(4, 1, ast.Call) == types.StrTyp
+    assert tc.type_at(4, 1, ast.Call) == types.StrShape
 
 
 def test_simple_product_shape() -> None:
@@ -250,8 +250,8 @@ def test_simple_product_shape() -> None:
         Person = {name Str, age Int}
     """)
     assert tc.type_at(1, 1, ast.ProductShape) == typ(
-        types.Shape,
-        attrs=(types.Attr("name", types.StrTyp), types.Attr("age", types.IntTyp)),
+        types.ProductShape,
+        attrs=(types.Attr("name", types.StrShape), types.Attr("age", types.IntShape)),
     )
 
 
@@ -264,13 +264,13 @@ def test_shape_literal() -> None:
         end
     """)
     assert tc.type_at(1, 1, ast.ProductShape) == typ(
-        types.Shape,
-        attrs=(types.Attr("name", types.StrTyp), types.Attr("age", types.IntTyp)),
+        types.ProductShape,
+        attrs=(types.Attr("name", types.StrShape), types.Attr("age", types.IntShape)),
     )
     assert str(tc.type_at(4, 1, ast.ShapeLit)) == str(
         typ(
-            types.Shape,
-            attrs=(types.Attr("name", types.StrTyp), types.Attr("age", types.IntTyp)),
+            types.ProductShape,
+            attrs=(types.Attr("name", types.StrShape), types.Attr("age", types.IntShape)),
         )
     )
 
@@ -298,13 +298,10 @@ def test_shape_literal_can_conform_to_shape_alias() -> None:
         v
     """)
     assert tc.type_at(3, 1, ast.Name) == typ(
-        types.Shape,
+        types.ProductShape,
         attrs=(
-            types.Attr(
-                "value", typ(types.Shape, attrs=(types.Attr("name", types.StrTyp),), variants=(), behaviours=())
-            ),
+            types.Attr("value", typ(types.ProductShape, attrs=(types.Attr("name", types.StrShape),), behaviours=())),
         ),
-        variants=(),
         behaviours=(),
     )
 
@@ -314,7 +311,7 @@ def test_read_member() -> None:
         foo = {name = "Peter", age = 42}
         foo.name
     """)
-    assert tc.type_at(2, 1, ast.Member) == types.StrTyp
+    assert tc.type_at(2, 1, ast.Member) == types.StrShape
 
 
 def test_behaviour() -> None:
@@ -327,25 +324,27 @@ def test_behaviour() -> None:
         v.print_value()
     """)
     assert tc.type_at(1, 1, ast.FunDef) == typ(
-        types.Fun,
+        types.FunShape,
         name="print_value",
         namespace="Value",
-        params=(
-            types.Attr("v", typ(types.Shape, attrs=(types.Attr("value", empty_shape()),), variants=(), behaviours=())),
-        ),
-        result=types.UnitTyp,
+        params=(types.Attr("v", typ(types.ProductShape, attrs=(types.Attr("value", empty_shape()),), behaviours=())),),
+        result=types.UnitShape,
     )
     assert str(tc.type_at(6, 1, ast.Member)) == str(
         typ(
-            types.Fun,
+            types.FunShape,
             name="print_value",
             namespace="Value",
             params=(
                 types.Attr(
                     "v",
-                    typ(types.Shape, attrs=(types.Attr("value", types.StrTyp),), variants=(), behaviours=("@Value",)),
+                    typ(
+                        types.ProductShape,
+                        attrs=(types.Attr("value", types.StrShape),),
+                        behaviours=("@Value",),
+                    ),
                 ),
             ),
-            result=types.UnitTyp,
+            result=types.UnitShape,
         )
     )

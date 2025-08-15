@@ -442,7 +442,7 @@ class FunGen:
         self.fun_ir = FunIR(fun_def, name, params, result, [])
         self.block = self.new_block()
 
-    def fun_name(self, fun: types.Fun) -> str:
+    def fun_name(self, fun: types.FunShape) -> str:
         if fun.builtin:
             assert fun.name is not None
             return fun.name
@@ -463,7 +463,7 @@ class FunGen:
 
     def typ(self, typ: types.Typ) -> Typ:
         match typ.typ:
-            case types.Primitive():
+            case types.PrimitiveShape():
                 match typ.typ.name:
                     case "Bool":
                         return I1
@@ -477,14 +477,14 @@ class FunGen:
                         return NoneTyp()
                     case _:
                         raise AssertionError(f"Unsupported primitive type: {typ.typ.name}")
-            case types.Shape():
+            case types.ProductShape():
                 name = typ.mangled_name()
                 if existing := self.ir.structs.get(name):
                     return existing
                 struct = Struct(typ.mangled_name(), [self.typ(x.typ) for x in typ.typ.attrs_sorted])
                 self.ir.structs[name] = struct
                 return struct
-            case types.Fun():
+            case types.FunShape():
                 return Fun(
                     typ.mangled_name(),
                     [self.typ(x.typ) for x in typ.typ.params],
@@ -607,7 +607,7 @@ class FunGen:
                 if isinstance(parent, ast.Call) and parent.callee == node:
                     return node
                 ir_typ = self.type_env.get(node)
-                if not isinstance(ir_typ, types.Fun) or not ir_typ.is_named:
+                if not isinstance(ir_typ, types.FunShape) or not ir_typ.is_named:
                     return node
                 # Emit a GetFnPtr if the identifier refers to a named function.
                 getptr_reg = self.reg(Ptr(self.typ(ir_typ)))
@@ -620,7 +620,7 @@ class FunGen:
                 src = self.node_regs[node.target.id]
                 types_src = self.type_env.get(node.target)
                 assert isinstance(src.typ, Struct), f"Expected Struct, got {src.typ}"
-                assert isinstance(types_src.typ, types.Shape), f"Expected Shape, got {types_src}"
+                assert isinstance(types_src.typ, types.ProductShape), f"Expected Shape, got {types_src}"
                 attr = types_src.typ.attr(node.name)
                 if attr is not None:
                     attr_index = types_src.typ.attrs_sorted.index(attr)
@@ -636,7 +636,7 @@ class FunGen:
                 # todo: emit a GetFnPtr if `parent` isn't ast.Call.
             case ast.Call():
                 callee = self.type_env.get(node.callee)
-                assert isinstance(callee.typ, types.Fun), f"Expected Fun, got {callee}"
+                assert isinstance(callee.typ, types.FunShape), f"Expected Fun, got {callee}"
                 fun = callee.typ
                 ast.walk(node, self.generate)
                 args = [self.node_regs[x.id] for x in node.args]

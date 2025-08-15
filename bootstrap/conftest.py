@@ -105,15 +105,15 @@ def node(kind: Callable, **kwargs: Any) -> ast.Node:
 def typ(kind: Callable, **kwargs: Any) -> types.Typ:
     defaults: Any = {"span": Span("test.kl", "", 0, 0)}
     match kind:
-        case types.Shape:
-            defaults.update({"name": None, "attrs": (), "variants": (), "behaviours": ()})
-        case types.Fun:
+        case types.ProductShape:
+            defaults.update({"name": None, "attrs": (), "behaviours": ()})
+        case types.FunShape:
             defaults.update({"name": None, "builtin": False, "namespace": None})
     return types.Typ(kind(**defaults | kwargs), [])
 
 
 def empty_shape() -> types.Typ:
-    return typ(types.Shape, attrs=(), variants=(), behaviours=())
+    return typ(types.ProductShape, attrs=(), behaviours=())
 
 
 def typecheck(code: str) -> TypeChecker:

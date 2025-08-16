@@ -94,7 +94,7 @@ class Parser:
         return t.value_str()
 
     def expect_behaviour_ns(self) -> str | None:
-        t = self.expect(token.Kind.behaviour_ns)
+        t = self.expect(token.Kind.behaviour_ident)
         if t is None:
             return t
         return t.value_str()
@@ -120,13 +120,13 @@ class Parser:
                 kind = "ident"
             case token.Kind.type_ident:
                 kind = "type"
-            case token.Kind.behaviour_ns:
+            case token.Kind.behaviour_ident:
                 kind = "behaviour"
             case _:
                 raise AssertionError(f"Unexpected token kind: {expected_kind}")
         return ast.Name(self.id(), ident.value_str(), kind, self.input.span_merge(span))
 
-    def parse_shape_decl(self) -> ast.ShapeDecl | None:
+    def parse_shape_alias(self) -> ast.ShapeAlias | None:
         span = self.input.span()
         name = self.expect_type_ident()
         if not name:
@@ -136,33 +136,24 @@ class Parser:
         shape = self.parse_shape()
         if not shape:
             return None
-        behaviours: list[str] = []
-        if self.input.peek().kind == token.Kind.plus:
-            while True:
-                self.input.next()
-                behaviour = self.expect_behaviour_ns()
-                if not behaviour:
-                    return None
-                behaviours.append(behaviour)
-                if self.input.peek().kind != token.Kind.plus:
-                    break
-        return ast.ShapeDecl(self.id(), name, shape, behaviours, self.input.span_merge(span))
+        return ast.ShapeAlias(self.id(), name, shape, self.input.span_merge(span))
 
     def parse_shape(self) -> ast.Shape | None:
         span = self.input.span()
-        result = self.parse_primary_shape()
-        if not result:
+        shape = self.parse_primary_shape()
+        if shape is None:
             return None
+        sum_shapes = [shape]
         while self.input.peek().kind == token.Kind.pipe:
             self.input.next()
             shape = self.parse_primary_shape()
             if not shape:
                 return None
-            if not isinstance(result, ast.SumShape):
-                result = ast.SumShape(self.id(), [result, shape], self.input.span_merge(span))
-            else:
-                result.variants.append(shape)
-        return result
+            sum_shapes.append(shape)
+        if len(sum_shapes) == 1:
+            return sum_shapes[0]
+        # todo: how to assign behaviours to sum shapes?
+        return ast.SumShape(self.id(), sum_shapes, [], self.input.span_merge(span))
 
     def parse_primary_shape(self) -> ast.Shape | None:
         t = self.input.peek()
@@ -184,12 +175,6 @@ class Parser:
                 return None
         if not shape:
             return None
-        if self.input.peek().kind == token.Kind.plus and self.input.peek1().kind != token.Kind.behaviour_ns:
-            self.input.next()
-            rhs = self.parse_primary_shape()
-            if not rhs:
-                return None
-            shape = ast.ProductShapeComp(self.id(), shape, rhs, self.input.span_merge(t.span))
         return shape
 
     def parse_fun_shape(self) -> ast.FunShape | None:
@@ -204,10 +189,10 @@ class Parser:
             param_name = self.expect_ident()
             if not param_name:
                 return None
-            param_shape = self.parse_shape()
-            if not param_shape:
+            param_shape_def = self.parse_shape()
+            if not param_shape_def:
                 return None
-            params.append(ast.Attr(self.id(), param_name, param_shape, self.input.span_merge(param_span)))
+            params.append(ast.Attr(self.id(), param_name, param_shape_def, self.input.span_merge(param_span)))
             match self.input.peek().kind:
                 case token.Kind.comma:
                     self.input.next()
@@ -225,23 +210,47 @@ class Parser:
 
     def parse_product_shape(self) -> ast.ProductShape | None:
         span = self.input.span()
-        if not self.expect(token.Kind.curly_left):
-            return None
-        attrs: list[ast.Attr] = []
-        while self.input.peek().kind != token.Kind.curly_right:
-            param_span = self.input.span()
-            param_name = self.expect_ident()
-            if not param_name:
+
+        def parse_shape() -> ast.Shape | None:
+            span = self.input.span()
+            if not self.expect(token.Kind.curly_left):
                 return None
-            param_type = self.parse_shape()
-            if not param_type:
+            attrs: list[ast.Attr] = []
+            while self.input.peek().kind != token.Kind.curly_right:
+                param_span = self.input.span()
+                param_name = self.expect_ident()
+                if not param_name:
+                    return None
+                param_shape_def = self.parse_shape()
+                if not param_shape_def:
+                    return None
+                attrs.append(ast.Attr(self.id(), param_name, param_shape_def, self.input.span_merge(param_span)))
+                if self.input.peek().kind == token.Kind.comma:
+                    self.input.next()
+            if not self.expect(token.Kind.curly_right):
                 return None
-            attrs.append(ast.Attr(self.id(), param_name, param_type, self.input.span_merge(param_span)))
-            if self.input.peek().kind == token.Kind.comma:
-                self.input.next()
-        if not self.expect(token.Kind.curly_right):
-            return None
-        return ast.ProductShape(self.id(), attrs, self.input.span_merge(span))
+            return ast.ProductShape(self.id(), attrs, [], [], self.input.span_merge(span))
+
+        shape = parse_shape()
+        assert isinstance(shape, ast.ProductShape)
+        composites: list[ast.Shape] = []
+        behaviours: list[ast.Behaviour] = []
+        while self.input.peek().kind == token.Kind.plus and self.input.peek1().kind != token.Kind.behaviour_ident:
+            self.input.next()
+            composite = parse_shape()
+            if not composite:
+                return None
+            composites.append(composite)
+        while self.input.peek().kind == token.Kind.plus:
+            self.input.next()
+            behaviour_name = self.expect_behaviour_ns()
+            if not behaviour_name:
+                return None
+            behaviour = ast.Behaviour(self.id(), behaviour_name, self.input.span_merge(span))
+            behaviours.append(behaviour)
+        shape.behaviours = behaviours
+        shape.composites = composites
+        return shape
 
     def parse_behaviour_fun_def(self) -> ast.FunDef | None:
         span = self.input.span()
@@ -267,7 +276,10 @@ class Parser:
             param_name = self.expect(token.Kind.ident)
             if not param_name:
                 return None
-            params.append(ast.FunParam(self.id(), param_name.value_str(), param_name.span))
+            param_shape_def = self.parse_shape()
+            if not param_shape_def:
+                return None
+            params.append(ast.FunParam(self.id(), param_name.value_str(), param_shape_def, param_name.span))
             match self.input.peek().kind:
                 case token.Kind.comma:
                     self.input.next()
@@ -278,10 +290,15 @@ class Parser:
                     return None
         if not self.expect(token.Kind.paren_right):
             return None
+        result = ast.UnitShape(self.id(), self.input.span())
+        if self.input.peek().kind != token.Kind.colon:
+            result = self.parse_shape()
+            if not result:
+                return None
         body, _ = self.parse_block()
         if not body:
             return None
-        return ast.FunDef(self.id(), name, namespace, params, body, self.input.span_merge(span))
+        return ast.FunDef(self.id(), name, namespace, params, result, body, self.input.span_merge(span))
 
     def parse_if(self) -> ast.If | None:
         span = self.input.span()
@@ -376,7 +393,7 @@ class Parser:
             case token.Kind.if_:
                 return self.parse_if()
             case token.Kind.type_ident | token.Kind.curly_left:
-                return self.parse_shape_literal()
+                return self.parse_shape_lit()
             case _:
                 self.error(error.unexpected_token(t.span, t.kind.value))
                 return None
@@ -401,40 +418,63 @@ class Parser:
             return None
         return ast.Member(self.id(), target, name, self.input.span_merge(span))
 
-    def parse_shape_literal(self) -> ast.ShapeLit | None:
+    def parse_shape_lit(self) -> ast.ShapeLit | None:
+        t = self.input.peek()
+        match t.kind:
+            case token.Kind.curly_left | token.Kind.type_ident:
+                return self.parse_product_shape_lit()
+            case _:
+                self.error(error.unexpected_token(t.span, t.kind.name, t.kind.curly_left.name, t.kind.type_ident.name))
+                return None
+
+    def parse_product_shape_lit(self) -> ast.ShapeLit | None:
         span = self.input.span()
-        t = self.expect(token.Kind.curly_left, token.Kind.type_ident)
-        if not t:
-            return None
-        shape_ref: ast.ShapeRef | None = None
-        if t.kind == token.Kind.type_ident:
-            shape_ref = ast.ShapeRef(self.id(), t.value_str(), t.span)
+
+        def parse_lit() -> ast.ShapeLit | None:
+            shape_ref: ast.ShapeRef | None = None
+            if self.input.peek().kind == token.Kind.type_ident:
+                t = self.input.next()
+                shape_ref = ast.ShapeRef(self.id(), t.value_str(), self.input.span_merge(t.span))
             if not self.expect(token.Kind.curly_left):
                 return None
-        attrs: list[ast.ShapeLitAttr] = []
-        while self.input.peek().kind != token.Kind.curly_right:
-            param_span = self.input.span()
-            param_name = self.expect_ident()
-            if not param_name:
+            attrs: list[ast.ShapeLitAttr] = []
+            while self.input.peek().kind != token.Kind.curly_right:
+                param_span = self.input.span()
+                param_name = self.expect_ident()
+                if not param_name:
+                    return None
+                if not self.expect(token.Kind.eq):
+                    return None
+                param_value = self.parse_expr()
+                if not param_value:
+                    return None
+                attrs.append(ast.ShapeLitAttr(self.id(), param_name, param_value, self.input.span_merge(param_span)))
+                if self.input.peek().kind == token.Kind.comma:
+                    self.input.next()
+            if not self.expect(token.Kind.curly_right):
                 return None
-            if not self.expect(token.Kind.eq):
+            return ast.ShapeLit(self.id(), attrs, shape_ref, [], [], self.input.span_merge(span))
+
+        shape = parse_lit()
+        assert isinstance(shape, ast.ShapeLit)
+        composites: list[ast.ShapeLit] = []
+        while self.input.peek().kind == token.Kind.plus and self.input.peek1().kind != token.Kind.behaviour_ident:
+            self.input.next()
+            composite = parse_lit()
+            if not composite:
                 return None
-            param_value = self.parse_expr()
-            if not param_value:
-                return None
-            attrs.append(ast.ShapeLitAttr(self.id(), param_name, param_value, self.input.span_merge(param_span)))
-            if self.input.peek().kind == token.Kind.comma:
-                self.input.next()
-        if not self.expect(token.Kind.curly_right):
-            return None
-        behaviours: list[str] = []
+            composites.append(composite)
+        behaviours: list[ast.Behaviour] = []
         while self.input.peek().kind == token.Kind.plus:
             self.input.next()
-            behaviour = self.expect_behaviour_ns()
-            if not behaviour:
+            behaviour_name = self.expect_behaviour_ns()
+            if not behaviour_name:
                 return None
+            behaviour = ast.Behaviour(self.id(), behaviour_name, self.input.span_merge(span))
             behaviours.append(behaviour)
-        return ast.ShapeLit(self.id(), shape_ref, behaviours, attrs, self.input.span_merge(span))
+        shape.behaviours = behaviours
+        shape.composites = composites
+        return shape
 
     def parse_call(self, callee: ast.Expr) -> ast.Expr | None:
         span = self.input.span()
@@ -494,10 +534,10 @@ class Parser:
             case token.Kind.type_ident:
                 match self.input.peek1().kind:
                     case token.Kind.curly_left:
-                        return self.parse_shape_literal()
+                        return self.parse_shape_lit()
                     case _:
-                        return self.parse_shape_decl()
-            case token.Kind.behaviour_ns:
+                        return self.parse_shape_alias()
+            case token.Kind.behaviour_ident:
                 return self.parse_behaviour_fun_def()
             case token.Kind.ident:
                 # This might be an assignment, a function definition, or an expression.

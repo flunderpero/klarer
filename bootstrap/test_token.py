@@ -35,7 +35,7 @@ def test_token() -> None:
         (token.Kind.ident, "index"),
         (token.Kind.type_ident, "Int"),
         (token.Kind.curly_right, None),
-        (token.Kind.behaviour_ns, "List"),
+        (token.Kind.behaviour_ident, "List"),
         (token.Kind.dot, None),
         (token.Kind.ident, "new"),
         (token.Kind.eq, None),

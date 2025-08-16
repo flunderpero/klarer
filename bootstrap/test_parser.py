@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 from . import ast
-from .conftest import node, parse_first
+from .conftest import node, parse, parse_first
 
-int_type = node(ast.ShapeRef, name="Int")
-str_type = node(ast.ShapeRef, name="Str")
-bool_type = node(ast.ShapeRef, name="Bool")
+int_shape = node(ast.ShapeRef, name="Int")
+str_shape = node(ast.ShapeRef, name="Str")
+bool_shape = node(ast.ShapeRef, name="Bool")
+unit_shape = node(ast.UnitShape)
 
 
 def test_literals() -> None:
@@ -24,63 +25,65 @@ def test_assign() -> None:
     )
 
 
-def test_fun_def() -> None:
-    assert parse_first("foo = fun(a, b): end") == node(
+def test_complex_fun_def() -> None:
+    assert parse_first("foo = fun(a Str, b {value Str} + @Value) {value Str} + @Value: end") == node(
         ast.FunDef,
         name="foo",
-        params=[node(ast.FunParam, name="a"), node(ast.FunParam, name="b")],
-        body=node(ast.Block, nodes=[]),
-    )
-
-
-def test_fun_def_with_behaviour_ns() -> None:
-    assert parse_first("@Foo.bar = fun(a, b): end") == node(
-        ast.FunDef,
-        name="bar",
-        namespace="Foo",
-        params=[node(ast.FunParam, name="a"), node(ast.FunParam, name="b")],
+        params=[
+            node(ast.FunParam, name="a", shape=str_shape),
+            node(
+                ast.FunParam,
+                name="b",
+                shape=node(
+                    ast.ProductShape,
+                    attrs=[node(ast.Attr, name="value", shape=str_shape)],
+                    behaviours=[node(ast.Behaviour, name="Value")],
+                ),
+            ),
+        ],
+        result=node(
+            ast.ProductShape,
+            attrs=[node(ast.Attr, name="value", shape=str_shape)],
+            behaviours=[node(ast.Behaviour, name="Value")],
+        ),
         body=node(ast.Block, nodes=[]),
     )
 
 
 def test_fun_shapes() -> None:
-    assert parse_shape_decl("Foo = fun(a Int, b Str) Bool", "Foo") == node(
+    assert parse_shape_alias("Foo = fun(a Int, b Str) Bool", "Foo") == node(
         ast.FunShape,
         params=[
-            node(ast.Attr, name="a", shape=int_type),
-            node(ast.Attr, name="b", shape=str_type),
+            node(ast.Attr, name="a", shape=int_shape),
+            node(ast.Attr, name="b", shape=str_shape),
         ],
-        result=bool_type,
+        result=bool_shape,
     )
 
 
-def test_shape_refs() -> None:
-    assert parse_shape_decl("Foo = Bar", "Foo") == node(ast.ShapeRef, name="Bar")
+def test_shape_alias() -> None:
+    assert parse_shape_alias("Foo = Bar", "Foo") == node(ast.ShapeRef, name="Bar")
 
 
 def test_product_shapes() -> None:
-    assert parse_shape_decl("Foo = {a Int}", "Foo") == node(
-        ast.ProductShape,
-        attrs=[node(ast.Attr, name="a", shape=int_type)],
+    assert parse_shape_alias("Foo = {a Int}", "Foo") == node(
+        ast.ProductShape, attrs=[node(ast.Attr, name="a", shape=int_shape)]
     )
 
 
 def test_sum_shapes() -> None:
-    assert parse_shape_decl("Foo = Int | Str", "Foo") == node(ast.SumShape, variants=[int_type, str_type])
+    assert parse_shape_alias("Foo = Int | Str", "Foo") == node(ast.SumShape, variants=[int_shape, str_shape])
 
 
 def test_complex_shapes() -> None:
-    assert parse_shape_decl("Foo = {a Int, b Str} | Int | {c {d Bool}}", "Foo") == node(
+    assert parse_shape_alias("Foo = {a Int, b Str} | Int | {c {d Bool} + @Bar}", "Foo") == node(
         ast.SumShape,
         variants=[
             node(
                 ast.ProductShape,
-                attrs=[
-                    node(ast.Attr, name="a", shape=int_type),
-                    node(ast.Attr, name="b", shape=str_type),
-                ],
+                attrs=[node(ast.Attr, name="a", shape=int_shape), node(ast.Attr, name="b", shape=str_shape)],
             ),
-            int_type,
+            int_shape,
             node(
                 ast.ProductShape,
                 attrs=[
@@ -89,7 +92,8 @@ def test_complex_shapes() -> None:
                         name="c",
                         shape=node(
                             ast.ProductShape,
-                            attrs=[node(ast.Attr, name="d", shape=bool_type)],
+                            attrs=[node(ast.Attr, name="d", shape=bool_shape)],
+                            behaviours=[node(ast.Behaviour, name="Bar")],
                         ),
                     )
                 ],
@@ -98,39 +102,20 @@ def test_complex_shapes() -> None:
     )
 
 
-def test_product_shape_composition() -> None:
-    assert parse_shape_decl("Foo = {a Int} + Bar", "Foo") == node(
-        ast.ProductShapeComp,
-        lhs=node(ast.ProductShape, attrs=[node(ast.Attr, name="a", shape=int_type)]),
-        rhs=node(ast.ShapeRef, name="Bar"),
-    )
+def test_behaviour_has_to_come_after_composition() -> None:
+    _, _, errors = parse("""
+        Foo = {name Str} + @Value + {value {}}
+    """)
+    assert errors == ["Expected `behaviour identifier`, got `{`", "Unexpected token `}`"]
 
 
-def test_product_shape_composition_preceeds_sum_shape() -> None:
-    assert parse_shape_decl("Foo = {a Int} + Bar | Baz", "Foo") == node(
-        ast.SumShape,
-        variants=[
-            node(
-                ast.ProductShapeComp,
-                lhs=node(ast.ProductShape, attrs=[node(ast.Attr, name="a", shape=int_type)]),
-                rhs=node(ast.ShapeRef, name="Bar"),
-            ),
-            node(ast.ShapeRef, name="Baz"),
-        ],
-    )
-
-
-def test_shape_behaviour() -> None:
-    decl = parse_first("Foo = Bar | Baz + @Foo + @Baz")
-    assert isinstance(decl, ast.ShapeDecl)
-    assert decl.behaviours == ["Foo", "Baz"]
-    assert decl.shape == node(ast.SumShape, variants=[node(ast.ShapeRef, name="Bar"), node(ast.ShapeRef, name="Baz")])
-
-
-def test_shape_literal() -> None:
+def test_shape_product_literal_basics() -> None:
     assert parse_first("{a = 42}") == node(
         ast.ShapeLit, attrs=[node(ast.ShapeLitAttr, name="a", value=node(ast.IntLit, value=42))]
     )
+
+
+def test_shape_product_literal_with_shape_ref() -> None:
     assert parse_first("Foo{a = 42}") == node(
         ast.ShapeLit,
         shape_ref=node(ast.ShapeRef, name="Foo"),
@@ -141,13 +126,13 @@ def test_shape_literal() -> None:
 def test_shape_literal_with_behaviour() -> None:
     assert parse_first("{a = 42} + @Foo") == node(
         ast.ShapeLit,
-        behaviours=["Foo"],
         attrs=[node(ast.ShapeLitAttr, name="a", value=node(ast.IntLit, value=42))],
+        behaviours=[node(ast.Behaviour, name="Foo")],
     )
 
 
-def test_nested_shape_literal() -> None:
-    assert parse_first("{a = {b = 42}}") == node(
+def test_composite_product_shape_literal() -> None:
+    assert parse_first("{a = {b = 42} + Foo{c = 137} + @Bar}") == node(
         ast.ShapeLit,
         attrs=[
             node(
@@ -156,28 +141,25 @@ def test_nested_shape_literal() -> None:
                 value=node(
                     ast.ShapeLit,
                     attrs=[node(ast.ShapeLitAttr, name="b", value=node(ast.IntLit, value=42))],
+                    composites=[
+                        node(
+                            ast.ShapeLit,
+                            attrs=[node(ast.ShapeLitAttr, name="c", value=node(ast.IntLit, value=137))],
+                            shape_ref=node(ast.ShapeRef, name="Foo"),
+                        )
+                    ],
+                    behaviours=[node(ast.Behaviour, name="Bar")],
                 ),
             )
         ],
     )
 
 
-def test_nested_shape_literal_with_shape_ref() -> None:
-    assert parse_first("Foo{a = Bar{b = 42}}") == node(
-        ast.ShapeLit,
-        shape_ref=node(ast.ShapeRef, name="Foo"),
-        attrs=[
-            node(
-                ast.ShapeLitAttr,
-                name="a",
-                value=node(
-                    ast.ShapeLit,
-                    shape_ref=node(ast.ShapeRef, name="Bar"),
-                    attrs=[node(ast.ShapeLitAttr, name="b", value=node(ast.IntLit, value=42))],
-                ),
-            )
-        ],
-    )
+def test_shape_literal_behaviour_has_to_come_after_composition() -> None:
+    _, _, errors = parse("""
+        Foo = {name Str} + @Value + {value {}}
+    """)
+    assert errors == ["Expected `behaviour identifier`, got `{`", "Unexpected token `}`"]
 
 
 def test_member() -> None:
@@ -230,17 +212,20 @@ def test_block() -> None:
 
 
 def test_behaviour_fun_def() -> None:
-    assert parse_first("@Foo.bar = fun(foo): end") == node(
-        ast.FunDef,
-        name="bar",
-        namespace="Foo",
-        params=[node(ast.FunParam, name="foo")],
-        body=node(ast.Block, nodes=[]),
+    assert str(parse_first("@Foo.bar = fun(foo Str): end")) == str(
+        node(
+            ast.FunDef,
+            name="bar",
+            namespace="Foo",
+            params=[node(ast.FunParam, name="foo", shape=str_shape)],
+            result=unit_shape,
+            body=node(ast.Block, nodes=[]),
+        )
     )
 
 
-def parse_shape_decl(code: str, expected_name: str) -> ast.Shape:
-    decl = parse_first(code)
-    assert isinstance(decl, ast.ShapeDecl)
-    assert decl.name == expected_name
-    return decl.shape
+def parse_shape_alias(code: str, expected_name: str) -> ast.Shape:
+    alias = parse_first(code)
+    assert isinstance(alias, ast.ShapeAlias)
+    assert alias.name == expected_name
+    return alias.shape

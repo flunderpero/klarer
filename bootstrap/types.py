@@ -3,7 +3,7 @@ from __future__ import annotations
 import inspect
 from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
-from typing import TYPE_CHECKING, Any, Callable, Literal, cast
+from typing import TYPE_CHECKING, Any, Callable, Literal
 
 from . import ast, error
 from .span import Span, log
@@ -34,43 +34,121 @@ class Behaviour:
 
 
 @dataclass(eq=True, frozen=True)
-class PrimitiveShape:
-    name: Literal["Bool", "Char", "Int", "Str", "Unit"]
+class Behaviours:
     behaviours: tuple[Behaviour, ...]
-    span: Span = field(compare=False, hash=False)
+
+    def is_same(self, other: Behaviours) -> bool:
+        """Two behaviours are the same if the resulting functions are the same.
+        If both, behaviour A and B expose a function x, then the order of A and B
+        is important.
+        """
+        self_funs = self.functions()
+        other_funs = other.functions()
+        if len(self_funs) != len(other_funs):
+            return False
+        for self_fun, other_fun in zip(self_funs, other_funs):
+            if not self_fun[0].is_same(other_fun[0]) or self_fun[1].is_same(other_fun[1]):
+                return False
+        return True
+
+    def conforms_to(self, other: Behaviours) -> bool:
+        """`self` conforms to `other` if it has at least all the behaviours of `other`
+        in the same order.
+        """
+        self_funs = self.functions()
+        other_funs = other.functions()
+        if len(self_funs) < len(other_funs):
+            return False
+        for behaviour, fun in other_funs:
+            if not any(x[0].is_same(behaviour) and x[1].is_same(fun) for x in self_funs):
+                return False
+        return True
+
+    def functions(self) -> tuple[tuple[Behaviour, FunShape], ...]:
+        funs = set()
+        for behaviour in self.behaviours:
+            for fun in behaviour.funs:
+                funs.add((behaviour, fun))
+        return tuple(funs)
+
+    def fun(self, name: str) -> FunShape | None:
+        for behaviour in reversed(self.behaviours):
+            fun = behaviour.fun(name)
+            if fun:
+                return fun
+        return None
+
+    def merge(self, other: Behaviours) -> Behaviours:
+        behaviours = list(self.behaviours)
+        for behaviour in other.behaviours:
+            if behaviour not in behaviours:
+                behaviours.append(behaviour)
+        return Behaviours(tuple(behaviours))
 
     def __str__(self) -> str:
-        behaviours = " + " + " + ".join(str(x) for x in self.behaviours) if self.behaviours else ""
-        return f"{self.name}{behaviours}"
+        return " + ".join(str(x) for x in self.behaviours)
 
-    def is_same(self, other: Shapes) -> bool:
+
+@dataclass(eq=True, frozen=True)
+class PrimitiveShape:
+    name: Literal["Bool", "Char", "Int", "Str"]
+    behaviours: Behaviours
+    span: Span = field(compare=False, hash=False, repr=False)
+
+    def __str__(self) -> str:
+        return self.name
+
+    def is_same(self, other: Shape) -> bool:
+        # Behaviours of primitives are guaranteed to be the same.
         return isinstance(other, PrimitiveShape) and self.name == other.name
 
     def mangled_name(self) -> str:
         return self.name
 
-    def conforms_to(self, other: Shapes) -> bool:
-        # For now, all primitives only conform to themselves or the empty shape.
+    def conforms_to(self, other: Shape) -> bool:
+        # For now, all primitives only conform to themselves, a sum shape, or the empty shape.
         # Later on, when we have different sized integers, I8 will conform to I16, etc.
-        return self == other or (isinstance(other, ProductShape) and other.is_empty())
+        if self.is_same(other):
+            return True
+        if isinstance(other, SumShape):
+            return any(self.conforms_to(x) for x in other.variants)
+        return isinstance(other, ProductShape) and other.is_empty()
+
+
+@dataclass(eq=True, frozen=True)
+class UnitShape:
+    behaviours = Behaviours(())
+    span: Span = field(compare=False, hash=False, repr=False)
+
+    def __str__(self) -> str:
+        return "_Unit"
+
+    def is_same(self, other: Shape) -> bool:
+        return isinstance(other, UnitShape)
+
+    def mangled_name(self) -> str:
+        return "_Unit"
+
+    def conforms_to(self, other: Shape) -> bool:
+        return isinstance(other, UnitShape)
 
 
 @dataclass(eq=True, frozen=True)
 class Attr:
     name: str
-    typ: Typ
+    shape: Shape
 
     def __str__(self) -> str:
-        return self.name + " " + str(self.typ)
+        return self.name + " " + str(self.shape)
 
     def is_same(self, other: Attr) -> bool:
-        return self.name == other.name and self.typ == other.typ
+        return self.name == other.name and self.shape.is_same(other.shape)
 
     def mangled_name(self) -> str:
-        return self.name + "_" + self.typ.mangled_name()
+        return self.name + "_" + self.shape.mangled_name()
 
     def conforms_to(self, other: Attr) -> bool:
-        return self.name == other.name and self.typ.conforms_to(other.typ)
+        return self.name == other.name and self.shape.conforms_to(other.shape)
 
 
 def same_tuple(a: tuple[Any, ...], b: tuple[Any, ...]) -> bool:
@@ -85,12 +163,12 @@ def sorted_tuple(a: tuple[Any, ...]) -> tuple[Any, ...]:
 class ProductShape:
     name: str | None
     attrs: tuple[Attr, ...]
-    behaviours: tuple[Behaviour, ...]
-    span: Span = field(compare=False, hash=False)
+    behaviours: Behaviours
+    span: Span = field(compare=False, hash=False, repr=False)
 
     @staticmethod
     def empty(span: Span) -> ProductShape:
-        return ProductShape(None, (), (), span)
+        return ProductShape(None, (), Behaviours(()), span)
 
     def is_named(self) -> bool:
         return self.name is not None
@@ -99,16 +177,15 @@ class ProductShape:
         return next((x for x in self.attrs if x.name == name), None)
 
     def __str__(self) -> str:
-        behaviours = " + " + " + ".join(str(x) for x in self.behaviours) if self.behaviours else ""
-        name = f" {self.name}" if self.name else ""
+        name = f"{self.name}" if self.name else ""
         attrs = ", ".join(str(x) for x in self.attrs)
-        return f"{name}{{{attrs}}}{behaviours}"
+        return f"{name}{{{attrs}}}"
 
-    def is_same(self, other: Shapes) -> bool:
+    def is_same(self, other: Shape) -> bool:
         return (
             isinstance(other, ProductShape)
             and same_tuple(self.attrs, other.attrs)
-            and same_tuple(self.behaviours, other.behaviours)
+            and self.behaviours.is_same(other.behaviours)
         )
 
     @property
@@ -116,64 +193,94 @@ class ProductShape:
         return tuple(sorted(self.attrs, key=lambda x: x.name))
 
     def mangled_name(self) -> str:
-        name = [x.mangled_name() for x in sorted_tuple(self.attrs) + sorted_tuple(self.behaviours)]
+        name = [x.mangled_name() for x in sorted_tuple(self.attrs)]
         if self.name:
             return self.name + "_" + "_".join(name)
         return "_".join(name)
 
     def is_empty(self) -> bool:
-        return not self.attrs and not self.behaviours
+        return not self.attrs
 
-    def conforms_to(self, other: Shapes) -> bool:
-        """A shape conforms the other shape if it has at least all the
-        attributes and behaviours of the other shape.
+    def conforms_to(self, other: Shape) -> bool:
+        """A product shape conforms the other shape if it has at least all the
+        attributes of the other shape and the behaviours conform.
 
-        The empty shape `{}` conforms any other shape, function, or primitive.
+        The empty shape `{}` conforms any other shape.
+
+        Examples:
+        - {name Str, age Int} conforms to {name Str}
+        - {} conforms any shape, function, or primitive
+
+        If `other` is a sum shape, then the product shape conforms to the sum shape
+        if any of the variants conform to the product shape.
+
+        """
+        if isinstance(other, SumShape):
+            return any(x.conforms_to(other) for x in other.variants)
+
+        if not isinstance(other, ProductShape):
+            return False
+
+        if not self.behaviours.conforms_to(other.behaviours):
+            return False
+
+        # All attributes of `other` must be present in `self`.
+        return all(any(x.conforms_to(attr) for x in self.attrs) for attr in other.attrs)
+
+
+@dataclass(eq=True, frozen=True, repr=False)
+class SumShape:
+    name: str | None
+    variants: tuple[Shape, ...]
+    behaviours: Behaviours
+    span: Span = field(compare=False, hash=False, repr=False)
+
+    def __str__(self) -> str:
+        variants = " | ".join(str(x) for x in self.variants)
+        name = f" {self.name}" if self.name else ""
+        return f"{name} {variants}"
+
+    def is_same(self, other: Shape) -> bool:
+        return (
+            isinstance(other, SumShape)
+            and same_tuple(self.variants, other.variants)
+            and self.behaviours.is_same(other.behaviours)
+        )
+
+    def mangled_name(self) -> str:
+        name = [x.mangled_name() for x in sorted_tuple(self.variants)]
+        if self.name:
+            return self.name + "_" + "_".join(name)
+        return "_".join(name)
+
+    def conforms_to(self, other: Shape) -> bool:
+        """A sum shape conforms the other shape if it has at least all the
+        variants of the other shape and the behaviours conform.
+
+        The empty shape `{}` conforms any other shape.
 
         Examples:
         - {name Str, age Int} conforms to {name Str}
         - {} conforms any shape, function, or primitive
 
         """
-        if not isinstance(other, ProductShape):
+        if not isinstance(other, SumShape):
             return False
 
-        # All attributes of `other` must be present in `self`.
-        for attr in other.attrs:
-            if not any(x.conforms_to(attr) for x in self.attrs):
-                return False  # Other is missing a required attribute
+        if not self.behaviours.conforms_to(other.behaviours):
+            return False
 
-        # All behaviours of `other` must be present in `self`.
-        for behaviour in other.behaviours:  # noqa: SIM110
-            if not any(x.is_same(behaviour) for x in self.behaviours):
-                return False
-
-        return True
-
-    def merge(self, other: ProductShape) -> ProductShape:
-        attrs = []
-        behaviours = [*self.behaviours]
-        for other_attr in other.attrs:
-            self_attr = self.attr(other_attr.name)
-            if self_attr is not None:
-                t = Typ(self_attr.typ.typ, origin_trail=[*self_attr.typ.origin_trail])
-                t.merge(other_attr.typ)
-                attrs.append(Attr(other_attr.name, t))
-            else:
-                attrs.append(other_attr)
-        for other_behaviour in other.behaviours:
-            if other_behaviour not in behaviours:
-                behaviours.append(other_behaviour)
-        return ProductShape(self.name, tuple(attrs), tuple(behaviours), self.span)
+        # All variants of `other` must be present in `self`.
+        return all(any(x.conforms_to(variant) for x in self.variants) for variant in other.variants)
 
 
 @dataclass(eq=True, frozen=True)
 class FunShape:
     name: str | None
     params: tuple[Attr, ...]
-    result: Typ
+    result: Shape
     namespace: str | None
-    span: Span = field(compare=False, hash=False)
+    span: Span = field(compare=False, hash=False, repr=False)
     builtin: bool
 
     @property
@@ -186,8 +293,12 @@ class FunShape:
         name = f" @{self.namespace}.{name[1:]}" if self.namespace else name
         return f"fun{name}({params}) -> {self.result}"
 
-    def is_same(self, other: Shapes) -> bool:
-        return isinstance(other, FunShape) and self.params == other.params and self.result == other.result
+    def is_same(self, other: Shape) -> bool:
+        return (
+            isinstance(other, FunShape)
+            and all(x.is_same(y) for x, y in zip(self.params, other.params))
+            and self.result.is_same(other.result)
+        )
 
     def mangled_name(self) -> str:
         if self.builtin:
@@ -201,7 +312,7 @@ class FunShape:
             name = self.namespace + "__" + name
         return name + "_".join(params)
 
-    def conforms_to(self, other: Shapes) -> bool:
+    def conforms_to(self, other: Shape) -> bool:
         """A function conforms the empty shape or another function if all
         its parameters and result conform the other function's parameters and result.
 
@@ -223,90 +334,55 @@ class FunShape:
         return True
 
 
-@dataclass
-class Typ[T: PrimitiveShape | ProductShape | FunShape | error.Error]:
-    typ: T
-    origin_trail: list[ast.Node]
-
-    def __str__(self) -> str:
-        return str(self.typ)
+@dataclass(eq=True, frozen=True)
+class ErrorShape:
+    error: error.Error
 
     @property
     def span(self) -> Span:
-        return self.typ.span
+        return self.error.span
 
-    def is_error(self) -> bool:
-        return isinstance(self.typ, error.Error)
+    def __str__(self) -> str:
+        return str(self.error)
 
-    def is_unit(self) -> bool:
-        return isinstance(self.typ, PrimitiveShape) and self.typ.name == "Unit"
-
-    def is_primitive(self) -> bool:
-        return isinstance(self.typ, PrimitiveShape)
-
-    def is_fun(self) -> bool:
-        return isinstance(self.typ, FunShape)
-
-    def is_empty_shape(self) -> bool:
-        return isinstance(self.typ, ProductShape) and self.typ.is_empty()
-
-    def conforms_to(self, other: Typ) -> bool:
-        if isinstance(self.typ, error.Error):
-            return False
-        return self.typ.conforms_to(other.typ)
-
-    def merge(self, other: Typ) -> None:
-        if self.is_empty_shape():
-            self.typ = other.typ
-        elif isinstance(self.typ, ProductShape) and not isinstance(other.typ, ProductShape):
-            self.typ = cast(T, self.typ.merge(other.typ))
-
-    def is_same(self, other: Typ) -> bool:
-        if isinstance(self.typ, error.Error):
-            return False
-        return self.typ.is_same(other.typ)
+    def is_same(self, _other: Shape) -> bool:
+        return False
 
     def mangled_name(self) -> str:
-        assert not isinstance(self.typ, error.Error), f"Type {self.typ} must be resolved before mangling"
-        return self.typ.mangled_name()
+        return "Error"
 
-    def __eq__(self, other: object) -> bool:
-        if not isinstance(other, Typ):
-            return NotImplemented
-        return self.typ == other.typ
+    def conforms_to(self, _other: Shape) -> bool:
+        return False
 
-    def __hash__(self) -> int:
-        return hash(self.typ)
 
+Shape = PrimitiveShape | ProductShape | SumShape | FunShape | UnitShape | ErrorShape
 
 builtin_span = Span("<builtin", "", 0, 0)
-BoolShape = Typ(PrimitiveShape("Bool", (), builtin_span), origin_trail=[])
-CharShape = Typ(PrimitiveShape("Char", (), builtin_span), origin_trail=[])
-IntShape = Typ(PrimitiveShape("Int", (), builtin_span), origin_trail=[])
-StrShape = Typ(PrimitiveShape("Str", (), builtin_span), origin_trail=[])
-UnitShape = Typ(PrimitiveShape("Unit", (), builtin_span), origin_trail=[])
-
-Shapes = ProductShape | FunShape | PrimitiveShape
+Bool = PrimitiveShape("Bool", Behaviours(()), builtin_span)
+Char = PrimitiveShape("Char", Behaviours(()), builtin_span)
+Int = PrimitiveShape("Int", Behaviours(()), builtin_span)
+Str = PrimitiveShape("Str", Behaviours(()), builtin_span)
+Unit = UnitShape(builtin_span)
 
 
 @dataclass
 class TypeEnv:
     parent: TypeEnv | None
-    node_types: dict[ast.NodeId, Typ]
+    node_shapes: dict[ast.NodeId, Shape]
 
-    def set(self, node: ast.Node, typ: Typ) -> None:
+    def set(self, node: ast.Node, shape: Shape) -> None:
         # If the type is unset in the root type_env, set it there, too.
         p = self
         while p.parent:
-            if node.id in p.parent.node_types:
+            if node.id in p.parent.node_shapes:
                 break
             p = p.parent
         else:
-            p.node_types[node.id] = typ
-        self.node_types[node.id] = typ
+            p.node_shapes[node.id] = shape
+        self.node_shapes[node.id] = shape
 
-    def get(self, node: ast.Node) -> Typ:
-        typ = self.node_types.get(node.id)
+    def get(self, node: ast.Node) -> Shape:
+        typ = self.node_shapes.get(node.id)
         if typ is None and self.parent:
             typ = self.parent.get(node)
         if typ is None:
@@ -316,7 +392,7 @@ class TypeEnv:
 
 @dataclass
 class Binding:
-    typ: Typ
+    shape: Shape
     builtin: bool
     is_fun_param: bool
 
@@ -332,29 +408,28 @@ class Scope:
         """The root scope with all the builtins."""
         span = Span("<builtin>", "", 0, 0)
         binding_defaults = {"builtin": True, "is_fun_param": False}
-        typ_defaults = {"origin_trail": []}
         fun_defaults = {"namespace": None, "span": span, "builtin": True}
         scope = Scope(None, None, {})
         scope.bindings["print"] = Binding(
-            Typ(FunShape("print", (Attr("s", StrShape),), UnitShape, **fun_defaults), **typ_defaults),
+            FunShape("print", (Attr("s", Str),), Unit, **fun_defaults),
             **binding_defaults,
         )
         scope.bindings["int_to_str"] = Binding(
-            Typ(FunShape("int_to_str", (Attr("i", IntShape),), StrShape, **fun_defaults), **typ_defaults),
+            FunShape("int_to_str", (Attr("i", Int),), Str, **fun_defaults),
             **binding_defaults,
         )
         scope.bindings["char_to_str"] = Binding(
-            Typ(FunShape("char_to_str", (Attr("c", CharShape),), StrShape, **fun_defaults), **typ_defaults),
+            FunShape("char_to_str", (Attr("c", Char),), Str, **fun_defaults),
             **binding_defaults,
         )
         scope.bindings["bool_to_str"] = Binding(
-            Typ(FunShape("bool_to_str", (Attr("b", BoolShape),), StrShape, **fun_defaults), **typ_defaults),
+            FunShape("bool_to_str", (Attr("b", Bool),), Str, **fun_defaults),
             **binding_defaults,
         )
-        scope.bindings["Int"] = Binding(IntShape, **binding_defaults)
-        scope.bindings["Str"] = Binding(StrShape, **binding_defaults)
-        scope.bindings["Bool"] = Binding(BoolShape, **binding_defaults)
-        scope.bindings["Char"] = Binding(CharShape, **binding_defaults)
+        scope.bindings["Int"] = Binding(Int, **binding_defaults)
+        scope.bindings["Str"] = Binding(Str, **binding_defaults)
+        scope.bindings["Bool"] = Binding(Bool, **binding_defaults)
+        scope.bindings["Char"] = Binding(Char, **binding_defaults)
         return scope
 
     def lookup(self, name: str) -> Binding | None:
@@ -365,7 +440,7 @@ class Scope:
         return None
 
     def bind(
-        self, name: str, typ: Typ, *, is_fun_param: bool = False, can_shadow_parent_scopes: bool = False
+        self, name: str, shape: Shape, *, is_fun_param: bool = False, can_shadow_parent_scopes: bool = False
     ) -> error.Error | None:
         """Bind the name to the typ.
         An error is returned if the name is already bound to a different type.
@@ -375,8 +450,8 @@ class Scope:
         """
         existing = self.lookup(name)
         if existing and (not can_shadow_parent_scopes or name in self.bindings):
-            return error.duplicate_declaration(name, typ.span, existing.typ.span)
-        self.bindings[name] = Binding(typ, builtin=False, is_fun_param=is_fun_param)
+            return error.duplicate_declaration(name, shape.span, existing.shape.span)
+        self.bindings[name] = Binding(shape, builtin=False, is_fun_param=is_fun_param)
         return None
 
     def inside(self, node_typ: type[ast.Node]) -> ast.Node | None:
@@ -438,11 +513,11 @@ class TypeCheck:
         specs = self.fun_specs.get(fun, [])
         param_types = [self.type_env.get(x) for x in call_args]
         for spec in specs:
-            if spec.base == fun and [x.typ for x in spec.specialized.params] == param_types:
+            if spec.base == fun and [x.shape for x in spec.specialized.params] == param_types:
                 return spec
         return None
 
-    def specialize(self, fun: FunShape, call_args: list[ast.Expr], span: Span) -> FunSpec | error.Error:
+    def specialize(self, fun: FunShape, call_args: list[ast.Expr], span: Span) -> FunSpec | ErrorShape:
         spec = self.fun_spec(fun, call_args)
         if spec:
             return spec
@@ -451,29 +526,27 @@ class TypeCheck:
             log("typechecker-mono", f">>> Specializing {fun} at call-site {span}", self.nesting_level)
 
             base = self.type_env.get(fun_def)
+            assert isinstance(base, FunShape)
             params: list[Attr] = []
             for param, arg in zip(fun.params, call_args):
-                typ = self.type_env.get(arg)
-                self.merge_fun_param(typ, param.typ)
-                params.append(Attr(param.name, typ))
-            specialized = FunShape(
-                fun.name, tuple(params), base.typ.result, fun.namespace, fun.span, builtin=fun.builtin
-            )
+                shape = self.type_env.get(arg)
+                params.append(Attr(param.name, shape))
+            specialized = FunShape(fun.name, tuple(params), base.result, fun.namespace, fun.span, builtin=fun.builtin)
 
-            spec = FunSpec(self.type_env, fun_def, base.typ, specialized)
+            spec = FunSpec(self.type_env, fun_def, base, specialized)
 
             if not spec.specialized.conforms_to(spec.base):
-                return self.error(error.does_not_conform_to(str(spec.specialized), str(spec.base), span)).typ
+                return self.error(error.does_not_conform_to(str(spec.specialized), str(spec.base), span))
 
             log(
                 "typechecker-mono",
                 f"Type checking {spec.base} at {spec.fun_def.span} with {spec.specialized} at call-site {span}",
                 self.nesting_level,
             )
-            typ = self.tc_fun_def_specialized(spec.fun_def, spec.specialized)
-            if typ.is_error():
-                return error.cascaded_error(typ.typ, span)
-            spec.specialized = replace(spec.specialized, result=typ.typ.result)
+            shape = self.tc_fun_def_specialized(spec.fun_def, spec.specialized)
+            if isinstance(shape, ErrorShape):
+                return ErrorShape(error.cascaded_error(shape.error, span))
+            spec.specialized = replace(spec.specialized, result=shape.result)
             log(
                 "typechecker-mono",
                 f"<<< Specialized {spec.base} at call-site {span} as {spec.specialized}",
@@ -502,126 +575,102 @@ class TypeCheck:
         finally:
             self.scope = prev
 
-    def error(self, err: error.Error) -> Typ:
+    def error(self, err: error.Error) -> ErrorShape:
         self.errors.append(err)
-        return Typ(err, [])
+        return ErrorShape(err)
 
-    def tc_assign(self, node: ast.Assign) -> Typ:
+    def tc_assign(self, node: ast.Assign) -> Shape:
         self.visit(node.value, None)
         value = self.type_env.get(node.value)
-        if value.is_error():
+        if isinstance(value, ErrorShape):
             return value
         binding = self.scope.lookup(node.target.name)
         if binding is not None:
-            if not binding.typ.is_same(value):
-                return self.error(error.is_not_same(str(value), str(binding.typ), node.target.span))
+            if not binding.shape.is_same(value):
+                return self.error(error.is_not_same(str(value), str(binding.shape), node.target.span))
         else:
             log("typechecker-trace", f"Binding {node.target.name} to {value}", self.nesting_level)
             self.scope.bind(node.target.name, value)
         self.type_env.set(node.target, value)
-        return UnitShape
+        return Unit
 
-    def tc_attr(self, node: ast.Attr) -> Typ:
+    def tc_attr(self, node: ast.Attr) -> Shape:
         ast.walk(node, self.visit)
-        typ = self.type_env.get(node.shape)
-        if typ.is_error():
-            return typ
-        return Typ(ProductShape(None, (Attr(node.name, typ),), (), node.span), origin_trail=[node, node.shape])
+        shape = self.type_env.get(node.shape)
+        if isinstance(shape, ErrorShape):
+            return shape
+        return ProductShape(None, (Attr(node.name, shape),), Behaviours(()), node.span)
 
-    def tc_binary_expr(self, node: ast.BinaryExpr) -> Typ:
+    def tc_behaviour(self, _node: ast.Behaviour) -> Shape:
+        return Unit
+
+    def tc_binary_expr(self, node: ast.BinaryExpr) -> Shape:
         ast.walk(node, self.visit)
         lhs = self.type_env.get(node.lhs)
         rhs = self.type_env.get(node.rhs)
-        if lhs.is_error():
+        if isinstance(lhs, ErrorShape):
             return lhs
-        if rhs.is_error():
+        if isinstance(rhs, ErrorShape):
             return rhs
-        # We can directly merge the types of the two operands.
-        self.merge_fun_param(lhs, rhs)
-        self.merge_fun_param(rhs, lhs)
         if not rhs.conforms_to(lhs):
             return self.error(error.does_not_conform_to(str(rhs), str(lhs), node.span))
-        return BoolShape
+        return Bool
 
-    def tc_block(self, node: ast.Block) -> Typ:
+    def tc_block(self, node: ast.Block) -> Shape:
         with self.child_scope(node):
             ast.walk(node, self.visit)
         if len(node.nodes) == 0:
-            return UnitShape
+            return Unit
         return self.type_env.get(node.nodes[-1])
 
-    def tc_call(self, node: ast.Call) -> Typ:
+    def tc_call(self, node: ast.Call) -> Shape:
         ast.walk(node, self.visit)
         callee = self.type_env.get(node.callee)
-        if callee.is_error():
+        if isinstance(callee, ErrorShape):
             return callee
-        if not isinstance(callee.typ, FunShape):
-            # This might be a function parameter being called - try to merge it.
-            if isinstance(node.callee, ast.Name):
-                fun = self.scope.lookup(node.callee.name)
-                if fun is not None and fun.is_fun_param:
-                    args = tuple(Attr(f"${i}", self.type_env.get(arg)) for i, arg in enumerate(node.args))
-                    self.merge_fun_param(
-                        callee,
-                        Typ(
-                            FunShape(
-                                node.callee.name,
-                                args,
-                                callee.typ,
-                                None,
-                                node.callee.span,
-                                builtin=False,
-                            ),
-                            [],
-                        ),
-                    )
-            if not isinstance(callee.typ, FunShape):
-                return self.error(error.not_callable(node.callee.span, callee.span))
-            return callee.typ.result
+        if not isinstance(callee, FunShape):
+            return self.error(error.not_callable(node.callee.span, callee.span))
 
         # Build a specialized function if it is not a builtin.
-        if callee.typ.builtin:
-            return callee.typ.result
+        if callee.builtin:
+            return callee.result
 
         args = node.args
-        if callee.typ.namespace:
+        if callee.namespace:
             assert isinstance(node.callee, ast.Member), f"Expected Member, got {node.callee}"
             args = [node.callee.target, *args]
 
-        spec = self.specialize(callee.typ, args, node.span)
-        if isinstance(spec, error.Error):
-            return Typ(error.cascaded_error(spec, node.span), [])
-        self.type_env.set(node.callee, Typ(spec.specialized, origin_trail=[node]))
+        spec = self.specialize(callee, args, node.span)
+        if isinstance(spec, ErrorShape):
+            return ErrorShape(error.cascaded_error(spec.error, node.span))
+        self.type_env.set(node.callee, spec.specialized)
 
         # Now check the types.
         callee = spec.specialized
         return callee.result
 
-    def tc_fun_def(self, node: ast.FunDef) -> Typ:
+    def tc_fun_def(self, node: ast.FunDef) -> Shape:
         params: list[Attr] = []
         with self.child_scope(node):
             for param in node.params:
                 self.visit(param, node)
-                param_typ = self.type_env.get(param)
-                param_typ.origin_trail.insert(-2, node)
-                if err := self.scope.bind(param.name, param_typ, is_fun_param=True):
+                param_shape = self.type_env.get(param)
+                if err := self.scope.bind(param.name, param_shape, is_fun_param=True):
                     return self.error(err)
-                params.append(Attr(param.name, param_typ))
+                params.append(Attr(param.name, param_shape))
             self.visit(node.body, node)
-        return_typ = self.type_env.get(node.body)
-        typ = Typ(
-            FunShape(node.name, (*params,), return_typ, node.namespace, node.span, builtin=False), origin_trail=[node]
-        )
-        log("typechecker-trace", f"Adding {typ.typ} to fun_defs", self.nesting_level)
-        self.fun_defs[typ.typ] = node
-        if err := self.scope.bind(node.name, typ):
+        return_shape = self.type_env.get(node.body)
+        shape = FunShape(node.name, (*params,), return_shape, node.namespace, node.span, builtin=False)
+        log("typechecker-trace", f"Adding {shape} to fun_defs", self.nesting_level)
+        self.fun_defs[shape] = node
+        if err := self.scope.bind(node.name, shape):
             return self.error(err)
         if node.name == "main":
             log("typechecker-trace", "Adding main to fun_defs", self.nesting_level)
-            fun = typ.typ
-            if len(fun.params) != 0 or fun.result != UnitShape:
-                if fun.result.is_error():
-                    return Typ(error.cascaded_error(fun.result.typ, node.span), [])
+            fun = shape
+            if len(fun.params) != 0 or fun.result != Unit:
+                if isinstance(fun.result, ErrorShape):
+                    return ErrorShape(error.cascaded_error(fun.result.error, node.span))
                 return self.error(error.invalid_main(node.span))
             self.fun_specs[fun] = [FunSpec(self.type_env, node, fun, fun)]
         if node.namespace:
@@ -629,241 +678,220 @@ class TypeCheck:
             behaviour_funs = []
             if behaviour:
                 behaviour_funs = list(behaviour.funs)
-            behaviour_funs.append(typ.typ)
+            behaviour_funs.append(shape)
             self.behaviours[node.namespace] = Behaviour(node.namespace, tuple(behaviour_funs))
-        return typ
+        return shape
 
-    def tc_fun_def_specialized(self, node: ast.FunDef, fun: FunShape) -> Typ:
+    def tc_fun_def_specialized(self, node: ast.FunDef, fun: FunShape) -> FunShape | ErrorShape:
         with self.child_scope(node):
             for param in fun.params:
-                if err := self.scope.bind(param.name, param.typ, is_fun_param=True, can_shadow_parent_scopes=True):
+                if err := self.scope.bind(param.name, param.shape, is_fun_param=True, can_shadow_parent_scopes=True):
                     return self.error(err)
             ast.walk(node, self.visit)
         return_typ = self.type_env.get(node.body)
-        fun = replace(fun, result=return_typ)
-        return Typ(fun, [node])
+        return replace(fun, result=return_typ)
 
-    def tc_fun_param(self, node: ast.FunParam) -> Typ:
-        return Typ(ProductShape.empty(node.span), [node])
+    def tc_fun_param(self, node: ast.FunParam) -> Shape:
+        ast.walk(node, self.visit)
+        shape = self.type_env.get(node.shape)
+        if isinstance(shape, ErrorShape):
+            return shape
+        return shape
 
-    def tc_if(self, node: ast.If) -> Typ:
+    def tc_if(self, node: ast.If) -> Shape:
         ast.walk(node, self.visit)
         # todo: for now, all arms and the else block must have the same type.
-        typ = self.type_env.get(node.arms[0])
+        shape = self.type_env.get(node.arms[0])
         for arm in node.arms:
-            arm_typ = self.tc_if_arm(arm)
-            if not typ.is_same(arm_typ):
-                return self.error(error.is_not_same(str(typ), str(arm_typ), arm.span))
+            arm_shape = self.tc_if_arm(arm)
+            if not shape.is_same(arm_shape):
+                return self.error(error.is_not_same(str(shape), str(arm_shape), arm.span))
         if node.else_block:
-            else_typ = self.tc_block(node.else_block)
+            else_shape = self.tc_block(node.else_block)
             # todo: if/else with different types should create a union type.
-            if not typ.is_same(else_typ):
-                return self.error(error.is_not_same(str(typ), str(else_typ), node.span))
-        return typ
+            if not shape.is_same(else_shape):
+                return self.error(error.is_not_same(str(shape), str(else_shape), node.span))
+        return shape
 
-    def tc_if_arm(self, node: ast.IfArm) -> Typ:
+    def tc_if_arm(self, node: ast.IfArm) -> Shape:
         ast.walk(node, self.visit)
         return self.tc_block(node.block)
 
-    def merge_fun_param(self, typ: Typ, merge_with: Typ | None) -> None:
-        """If `typ` is the type of a function parameter, make sure that all
-        `ast.Member` nodes in the origin trail of `typ` widen it to include
-        the member. After that, merge `typ` with `merge_with`.
-        """
-        # Search for a function param in the origin trail.
-        for i, param_node in enumerate(typ.origin_trail):  # noqa: B007
-            if isinstance(param_node, ast.FunParam):
-                break
-        else:
-            return
-        param_binding = self.scope.lookup(param_node.name)
-        assert param_binding, f"No type found for {param_node.name}"
-        if not param_binding.is_fun_param:
-            return
-        param_typ = param_binding.typ
-        log("typechecker-infer", f"Found fun param `{param_node.name}` with type `{param_typ}`", self.nesting_level)
-
-        # Now go down the trail and apply all member lookups.
-        for trail_node in typ.origin_trail[i:]:
-            match trail_node:
-                case ast.Member():
-                    log(
-                        "typechecker-infer",
-                        f"Merging `{param_typ}` with `{{{trail_node.name} {{}}}}`",
-                        self.nesting_level + 1,
-                    )
-                    param_typ.merge(
-                        Typ(
-                            ProductShape(
-                                None,
-                                (Attr(trail_node.name, Typ(ProductShape.empty(trail_node.span), [])),),
-                                (),
-                                trail_node.span,
-                            ),
-                            [],
-                        )
-                    )
-                    if isinstance(param_typ.typ, ProductShape):
-                        attr = param_typ.typ.attr(trail_node.name)
-                        assert attr
-                        attr.typ.origin_trail = param_typ.origin_trail
-                        param_typ = attr.typ
-        if merge_with:
-            param_typ.merge(merge_with)
-
-    def tc_member(self, node: ast.Member) -> Typ:
+    def tc_member(self, node: ast.Member) -> Shape:
         ast.walk(node, self.visit)
-        typ = self.type_env.get(node.target)
-        if typ.is_error():
-            return typ
-        typ.origin_trail.append(node)
-        # Ensure that if we reference a function parameter, its shape also
-        # contains this member access.
-        self.merge_fun_param(typ, None)
+        shape = self.type_env.get(node.target)
+        if isinstance(shape, ErrorShape):
+            return shape
         behaviour_fun = None
-        if isinstance(typ.typ, (ProductShape, PrimitiveShape)):
-            for behaviour in typ.typ.behaviours:
-                behaviour_fun = behaviour.fun(node.name)
-                if behaviour_fun:
-                    break
-        if isinstance(typ.typ, PrimitiveShape):
+        if isinstance(shape, (ProductShape, PrimitiveShape)):
+            behaviour_fun = shape.behaviours.fun(node.name)
+        if isinstance(shape, PrimitiveShape):
             if behaviour_fun is None:
-                return self.error(error.no_member(node.name, str(typ.typ), node.target.span, node.span))
-            return Typ(behaviour_fun, [])
-        shape = typ.typ
+                return self.error(error.no_member(node.name, str(shape), node.target.span, node.span))
+            return behaviour_fun
         if not isinstance(shape, ProductShape):
             return self.error(error.unexpected_shape(f"a shape with field `{node.name}`", str(shape), node.target.span))
         attr = shape.attr(node.name)
         if attr:
-            return attr.typ
+            return attr.shape
         if behaviour_fun:
-            return Typ(behaviour_fun, [])
+            return behaviour_fun
         return self.error(error.no_member(node.name, str(shape), node.target.span, node.span))
 
-    def tc_module(self, node: ast.Module) -> Typ:
+    def tc_module(self, node: ast.Module) -> Shape:
         ast.walk(node, self.visit)
-        return UnitShape
+        return Unit
 
-    def tc_name(self, node: ast.Name) -> Typ:
+    def tc_name(self, node: ast.Name) -> Shape:
         name = self.scope.lookup(node.name)
         if name is None:
             return self.error(error.undefined_name(node.name, node.span))
-        return name.typ
+        return name.shape
 
-    def tc_product_shape(self, node: ast.ProductShape) -> Typ:
+    def tc_product_shape(self, node: ast.ProductShape) -> Shape:
         ast.walk(node, self.visit)
         attrs: list[Attr] = []
         for attr in node.attrs:
-            typ = self.type_env.get(attr.shape)
-            if typ.is_error():
-                return typ
-            attrs.append(Attr(attr.name, typ))
-        return Typ(ProductShape(None, tuple(attrs), (), node.span), origin_trail=[node])
-
-    def tc_shape_literal(self, node: ast.ShapeLit) -> Typ:
-        ast.walk(node, self.visit)
-        attrs: list[Attr] = []
-        for attr in node.attrs:
-            typ = self.type_env.get(attr.value)
-            if typ.is_error():
-                return typ
-            attrs.append(Attr(attr.name, typ))
+            shape = self.type_env.get(attr.shape)
+            if isinstance(shape, ErrorShape):
+                return shape
+            attrs.append(Attr(attr.name, shape))
         behaviours = []
-        ref = None
+        for behaviour_node in node.behaviours:
+            behaviour = self.behaviours.get(behaviour_node.name)
+            if not behaviour:
+                return self.error(error.undefined_name(behaviour_node.name, behaviour_node.span))
+            behaviours.append(behaviour)
+        return ProductShape(None, tuple(attrs), Behaviours(tuple(behaviours)), node.span)
+
+    def tc_shape(self, node: ast.Shape) -> Shape:
+        ast.walk(node, self.visit)
+        raise NotImplementedError
+
+    def tc_shape_lit(self, node: ast.ShapeLit) -> Shape:
+        ast.walk(node, self.visit)
+        attrs = []
+        for attr in node.attrs:
+            self.visit(attr, node)
+            shape = self.type_env.get(attr.value)
+            if isinstance(shape, ErrorShape):
+                return shape
+            attrs.append(Attr(attr.name, shape))
+        behaviours = []
+        for behaviour_node in node.behaviours:
+            behaviour = self.behaviours.get(behaviour_node.name)
+            if not behaviour:
+                return self.error(error.undefined_name(behaviour_node.name, behaviour_node.span))
+            behaviours.append(behaviour)
+        for composite_node in node.composites:
+            composite = self.type_env.get(composite_node)
+            if isinstance(composite, ErrorShape):
+                return composite
+            assert isinstance(composite, ProductShape)
+            assert not composite.behaviours
+            # Merge attributes from composite into the shape.
+            for composite_attr in composite.attrs:
+                index = attrs.index(composite_attr)
+                if index < 0:
+                    attrs.append(composite_attr)
+                else:
+                    attrs[index] = composite_attr
+        shape = ProductShape(None, tuple(attrs), Behaviours(tuple(behaviours)), node.span)
         if node.shape_ref:
-            ref = self.scope.lookup(node.shape_ref.name)
-            if ref is None:
-                return self.error(error.undefined_name(node.shape_ref.name, node.shape_ref.span))
-            if isinstance(ref.typ.typ, ProductShape):
-                behaviours.extend(ref.typ.typ.behaviours)
-        for name in node.behaviours:
-            behaviour = self.behaviours.get(name)
-            if not behaviour:
-                return self.error(error.undefined_name(name, node.span))
-            behaviours.append(behaviour)
-        typ = Typ(ProductShape(None, tuple(attrs), tuple(behaviours), node.span), origin_trail=[node])
-        if ref and not typ.conforms_to(ref.typ):
-            assert node.shape_ref
-            return self.error(error.does_not_conform_to(str(typ.typ), node.shape_ref.name, node.shape_ref.span))
-        return typ
+            shape_ref = self.type_env.get(node.shape_ref)
+            if isinstance(shape_ref, ErrorShape):
+                return shape_ref
+            if not isinstance(shape_ref, FunShape):
+                shape = replace(shape, behaviours=shape.behaviours.merge(shape_ref.behaviours))
+            if not shape.conforms_to(shape_ref):
+                return self.error(error.does_not_conform_to(str(shape), node.shape_ref.name, node.span))
+            shape = replace(shape, name=node.shape_ref.name)
+        return shape
 
-    def tc_shape_literal_attr(self, node: ast.ShapeLitAttr) -> Typ:
+    def tc_shape_lit_attr(self, node: ast.ShapeLitAttr) -> Shape:
         ast.walk(node, self.visit)
-        typ = self.type_env.get(node.value)
-        if typ.is_error():
-            return typ
-        return Typ(ProductShape(None, (Attr(node.name, typ),), (), node.span), origin_trail=[node])
+        return Unit
 
-    def tc_shape_decl(self, node: ast.ShapeDecl) -> Typ:
+    def tc_shape_alias(self, node: ast.ShapeAlias) -> Shape:
         ast.walk(node, self.visit)
-        typ = self.type_env.get(node.shape)
-        if typ.is_error():
-            return typ
-        behaviours = []
-        for name in node.behaviours:
-            behaviour = self.behaviours.get(name)
-            if not behaviour:
-                return self.error(error.undefined_name(name, node.span))
-            behaviours.append(behaviour)
-        typ.typ = replace(typ.typ, behaviours=tuple(behaviours))
-        if err := self.scope.bind(node.name, typ):
-            return self.error(err)
-        return UnitShape
+        shape = self.type_env.get(node.shape)
+        if isinstance(shape, ErrorShape):
+            return shape
+        shape = replace(shape, name=node.name)
+        self.scope.bind(node.name, shape)
+        return Unit
 
-    def tc_shape_ref(self, node: ast.ShapeRef) -> Typ:
+    def tc_shape_ref(self, node: ast.ShapeRef) -> Shape:
         declared = self.scope.lookup(node.name)
         if declared is None:
             return self.error(error.undefined_name(node.name, node.span))
-        return declared.typ
+        return declared.shape
+
+    def tc_sum_shape(self, node: ast.SumShape) -> Shape:
+        ast.walk(node, self.visit)
+        variants = [self.type_env.get(variant) for variant in node.variants]
+        behaviours = []
+        for behaviour_node in node.behaviours:
+            behaviour = self.behaviours.get(behaviour_node.name)
+            if not behaviour:
+                return self.error(error.undefined_name(behaviour_node.name, behaviour_node.span))
+            behaviours.append(behaviour)
+        return SumShape(None, tuple(variants), Behaviours(tuple(behaviours)), node.span)
 
     def visit(self, node: ast.Node, _parent: ast.Node | None) -> ast.Node:
-        typ: Typ
+        shape: Shape
         match node:
             case ast.Assign():
-                typ = self.tc_assign(node)
+                shape = self.tc_assign(node)
             case ast.Attr():
-                typ = self.tc_attr(node)
+                shape = self.tc_attr(node)
+            case ast.Behaviour():
+                shape = self.tc_behaviour(node)
             case ast.BinaryExpr():
-                typ = self.tc_binary_expr(node)
+                shape = self.tc_binary_expr(node)
             case ast.Block():
-                typ = self.tc_block(node)
+                shape = self.tc_block(node)
             case ast.BoolLit():
-                typ = BoolShape
+                shape = Bool
             case ast.Call():
-                typ = self.tc_call(node)
+                shape = self.tc_call(node)
             case ast.CharLit():
-                typ = CharShape
+                shape = Char
             case ast.FunDef():
-                typ = self.tc_fun_def(node)
+                shape = self.tc_fun_def(node)
             case ast.FunParam():
-                typ = self.tc_fun_param(node)
+                shape = self.tc_fun_param(node)
             case ast.If():
-                typ = self.tc_if(node)
+                shape = self.tc_if(node)
             case ast.IfArm():
-                typ = self.tc_if_arm(node)
+                shape = self.tc_if_arm(node)
             case ast.IntLit():
-                typ = IntShape
+                shape = Int
             case ast.Member():
-                typ = self.tc_member(node)
+                shape = self.tc_member(node)
             case ast.Module():
-                typ = self.tc_module(node)
+                shape = self.tc_module(node)
             case ast.Name():
-                typ = self.tc_name(node)
+                shape = self.tc_name(node)
             case ast.ProductShape():
-                typ = self.tc_product_shape(node)
+                shape = self.tc_product_shape(node)
             case ast.ShapeLit():
-                typ = self.tc_shape_literal(node)
+                shape = self.tc_shape_lit(node)
             case ast.ShapeLitAttr():
-                typ = self.tc_shape_literal_attr(node)
-            case ast.ShapeDecl():
-                typ = self.tc_shape_decl(node)
+                shape = self.tc_shape_lit_attr(node)
+            case ast.ShapeAlias():
+                shape = self.tc_shape_alias(node)
             case ast.ShapeRef():
-                typ = self.tc_shape_ref(node)
+                shape = self.tc_shape_ref(node)
             case ast.StrLit():
-                typ = StrShape
+                shape = Str
+            case ast.SumShape():
+                shape = self.tc_sum_shape(node)
+            case ast.UnitShape():
+                shape = Unit
             case _:
                 raise AssertionError(f"Don't know how to type check: {node!r}")
-        self.type_env.set(node, typ)
+        self.type_env.set(node, shape)
         return node
 
 

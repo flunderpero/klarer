@@ -427,13 +427,13 @@ class FunGen:
         params: list[Param] = []
         if spec.specialized.params:
             for param in spec.specialized.params:
-                typ = self.typ(param.typ)
+                typ = self.typ(param.shape)
                 reg = self.reg(typ)
                 self.scope.declare(param.name, reg)
                 params.append(Param(reg, typ))
         else:
             for p in fun_typ.params:
-                typ = self.typ(p.typ)
+                typ = self.typ(p.shape)
                 reg = self.reg(typ)
                 self.scope.declare(p.name, reg)
                 params.append(Param(reg, typ))
@@ -461,10 +461,10 @@ class FunGen:
         yield
         self.scope = scope
 
-    def typ(self, typ: types.Typ) -> Typ:
-        match typ.typ:
+    def typ(self, shape: types.Shape) -> Typ:
+        match shape:
             case types.PrimitiveShape():
-                match typ.typ.name:
+                match shape.name:
                     case "Bool":
                         return I1
                     case "Char":
@@ -473,26 +473,26 @@ class FunGen:
                         return I64
                     case "Str":
                         return Str()
-                    case "Unit":
-                        return NoneTyp()
                     case _:
-                        raise AssertionError(f"Unsupported primitive type: {typ.typ.name}")
+                        raise AssertionError(f"Unsupported primitive type: {shape.name}")
+            case types.UnitShape():
+                return NoneTyp()
             case types.ProductShape():
-                name = typ.mangled_name()
+                name = shape.mangled_name()
                 if existing := self.ir.structs.get(name):
                     return existing
-                struct = Struct(typ.mangled_name(), [self.typ(x.typ) for x in typ.typ.attrs_sorted])
+                struct = Struct(name, [self.typ(x.shape) for x in shape.attrs_sorted])
                 self.ir.structs[name] = struct
                 return struct
             case types.FunShape():
                 return Fun(
-                    typ.mangled_name(),
-                    [self.typ(x.typ) for x in typ.typ.params],
-                    self.typ(typ.typ.result),
+                    shape.mangled_name(),
+                    [self.typ(x.shape) for x in shape.params],
+                    self.typ(shape.result),
                     is_named=True,
                 )
             case _:
-                raise AssertionError(f"Unsupported type: {typ} ({typ.__class__})")
+                raise AssertionError(f"Unsupported type: {shape} ({shape.__class__})")
 
     def reg(self, typ: Typ, prefix: str = "_") -> Reg:
         if isinstance(typ, NoneTyp):
@@ -559,7 +559,7 @@ class FunGen:
 
                 # Insert another phi node for the result of the whole if expression.
                 types_typ = self.type_env.get(node)
-                if not types_typ.is_unit():
+                if not isinstance(types_typ, types.UnitShape):
                     reg = self.reg(self.typ(types_typ))
                     phis = []
                     for arm, block in zip(arms, then_blocks):
@@ -620,10 +620,10 @@ class FunGen:
                 src = self.node_regs[node.target.id]
                 types_src = self.type_env.get(node.target)
                 assert isinstance(src.typ, Struct), f"Expected Struct, got {src.typ}"
-                assert isinstance(types_src.typ, types.ProductShape), f"Expected Shape, got {types_src}"
-                attr = types_src.typ.attr(node.name)
+                assert isinstance(types_src, types.ProductShape), f"Expected Shape, got {types_src}"
+                attr = types_src.attr(node.name)
                 if attr is not None:
-                    attr_index = types_src.typ.attrs_sorted.index(attr)
+                    attr_index = types_src.attrs_sorted.index(attr)
                     assert attr_index is not None, f"No member {node.name} in type {types_src}"
                     getptr_reg = self.reg(Ptr(src.typ.fields[attr_index]))
                     if isinstance(parent, ast.Assign):
@@ -633,11 +633,11 @@ class FunGen:
                         reg = self.reg(src.typ.fields[attr_index])
                         self.emit(Load(reg, getptr_reg), node)
                 # If it's not an attribute, it has to be a behaviour function.
-                # todo: emit a GetFnPtr if `parent` isn't ast.Call.
+                # todo: emit a GetFunPtr if `parent` isn't ast.Call.
             case ast.Call():
                 callee = self.type_env.get(node.callee)
-                assert isinstance(callee.typ, types.FunShape), f"Expected Fun, got {callee}"
-                fun = callee.typ
+                assert isinstance(callee, types.FunShape), f"Expected Fun, got {callee}"
+                fun = callee
                 ast.walk(node, self.generate)
                 args = [self.node_regs[x.id] for x in node.args]
                 if fun.namespace:
@@ -689,7 +689,7 @@ class FunGen:
                                 raise AssertionError(f"Unsupported type for equality comparison: {lhs_reg.typ}")
                     case _:
                         raise AssertionError(f"Unsupported binary op: {node.op}")
-            case ast.ShapeRef() | ast.FunParam():
+            case ast.ShapeRef() | ast.FunParam() | ast.UnitShape() | ast.Behaviour():
                 pass
             case _:
                 raise AssertionError(f"Unsupported node: {node.__class__}")

@@ -98,7 +98,7 @@ end
 a
 ```
 
-### If Expressions
+## If Expressions
 
 ```klarer
 main = fun():
@@ -163,20 +163,6 @@ main = fun():
 end
 ```
 
-## Shape Inference
-
-**Infer based on property access**
-
-```klarer
-deeply_nested = fun(o):
-    o.deeply.nested == 42
-end
-
-main = fun():
-    v = deeply_nested({deeply = {nested = "FAIL"}}) -- ERROR: `fun deeply_nested(o {deeply {nested Str}}) -> Bool` does not conform to shape `fun deeply_nested(o {deeply {nested Int}}) -> Bool`
-end
-```
-
 ## Assignment
 
 **Shape assignment creates a copy**
@@ -199,7 +185,7 @@ PASS
 ## Behaviour
 
 ```klarer
-@Value.print_value = fun(v):
+@Value.print_value = fun(v {value Str}):
     print(v.value)
 end
 
@@ -216,7 +202,7 @@ PASS
 **A shape literal should receive the behaviours of a shape alias**
 
 ```klarer
-@Value.print_value = fun(v):
+@Value.print_value = fun(v {value Str}):
     print(v.value)
 end
 

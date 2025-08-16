@@ -11,11 +11,9 @@ Klarer uses structural _Shapes_ instead of nominal types.
 Two shapes are structurally equal if they have the same attributes, the same variants, and the same
 behaviours.
 
-The shape of a function is determined by the use of its parameters and its result.
-
 ```klarer
 
-get_value = fun(o):
+get_value = fun(o {value {}}):
     o.value
 end
 

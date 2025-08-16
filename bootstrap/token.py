@@ -8,7 +8,7 @@ Value = str | None
 
 
 class Kind(Enum):
-    behaviour_ns = "behaviour ns"
+    behaviour_ident = "behaviour identifier"
     braket_left = "["
     braket_right = "]"
     case = "case"
@@ -196,7 +196,7 @@ def tokenize(input: Input) -> tuple[list[Token], list[error.Error]]:
                 input.next()
                 kind = Kind.char_lit
             case "@":
-                kind = Kind.behaviour_ns
+                kind = Kind.behaviour_ident
                 value = ""
                 while ((c := input.peek()).isalnum() and c.isascii()) or c == "_":
                     input.next()

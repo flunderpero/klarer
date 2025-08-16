@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import contextlib
-import dataclasses
 import os
 import tempfile
 import textwrap
@@ -11,40 +10,7 @@ from typing import Any, Callable, cast
 from . import ast, compiler, error, gogen, ir, parser, token, types
 from .span import Span
 
-ignore_fields = {"id", "span", "origin_trail"}
-
-# Monkey patch all AST and type classes to ignore `ignore_fields` in `__eq__` and `__repr__`.
-for clazz in list(ast.__dict__.values()) + list(types.__dict__.values()):
-    if not dataclasses.is_dataclass(clazz):
-        continue
-    if not any(x.name in ignore_fields for x in dataclasses.fields(clazz)):
-        continue
-
-    def make_eq(clazz: Any) -> None:
-        def eq(self: Any, other: Any) -> bool:
-            if self is None and other is None:
-                return True
-            if self is None or other is None:
-                return False
-            return all(
-                hasattr(self, x.name) and hasattr(other, x.name) and getattr(self, x.name) == getattr(other, x.name)
-                for x in dataclasses.fields(clazz)
-                if x.name not in ignore_fields
-            )
-
-        clazz.__eq__ = eq
-
-    def make_repr(clazz: Any) -> None:
-        def repr_(self: Any) -> str:
-            fields = ", ".join(
-                f"{x.name}={getattr(self, x.name)!r}" for x in dataclasses.fields(clazz) if x.name not in ignore_fields
-            )
-            return f"{clazz.__name__}({fields})"
-
-        clazz.__repr__ = repr_
-
-    make_eq(clazz)
-    make_repr(clazz)
+ast.nid_enabled = False
 
 id_ = 0
 
@@ -59,19 +25,19 @@ def errors_str(errors: list[error.Error]) -> str:
     return "\n".join(f"{x} at {x.stacktrace}" for x in errors)
 
 
-def parse(code: str) -> ast.Module:
+def parse(code: str) -> tuple[ast.Module, list[error.Error], list[str]]:
     global id_  # noqa: PLW0603
     id_ = 0
     code = stripln(code)
     tokens, errors = token.tokenize(token.Input("test.kl", code.strip()))
     assert errors_str(errors) == ""
     module, errors = parser.parse(parser.Input(tokens, next_id))
-    assert errors_str(errors) == ""
-    return module
+    return module, errors, [x.short_message() for x in errors]
 
 
 def parse_first(code: str) -> ast.Node:
-    module = parse(code)
+    module, _, errors = parse(code)
+    assert errors == [], f"Expected no errors, got {errors}"
     assert len(module.nodes) == 1, f"Expected 1 node, got {module.nodes}"
     return module.nodes[0]
 
@@ -95,49 +61,61 @@ def node(kind: Callable, **kwargs: Any) -> ast.Node:
             defaults.update({"else_block": None})
         case ast.Name:
             defaults.update({"kind": "ident"})
+        case ast.ShapeAlias:
+            defaults.update({"behaviours": []})
+        case ast.ProductShape:
+            defaults.update({"behaviours": [], "composites": []})
         case ast.ShapeLit:
-            defaults.update({"shape_ref": None, "behaviours": []})
-        case ast.ShapeDecl:
+            defaults.update({"shape_ref": None, "behaviours": [], "composites": []})
+        case ast.ShapeLit:
+            defaults.update({"behaviours": []})
+        case ast.SumShape:
             defaults.update({"behaviours": []})
     return kind(**defaults | kwargs)
 
 
-def typ(kind: Callable, **kwargs: Any) -> types.Typ:
+def shape(kind: Callable, **kwargs: Any) -> types.Shape:
     defaults: Any = {"span": Span("test.kl", "", 0, 0)}
     match kind:
+        case types.PrimitiveShape:
+            defaults.update({"name": None, "behaviours": types.Behaviours(())})
         case types.ProductShape:
-            defaults.update({"name": None, "attrs": (), "behaviours": ()})
+            defaults.update({"name": None, "attrs": (), "behaviours": types.Behaviours(())})
         case types.FunShape:
             defaults.update({"name": None, "builtin": False, "namespace": None})
-    return types.Typ(kind(**defaults | kwargs), [])
+    return kind(**defaults | kwargs)
 
 
-def empty_shape() -> types.Typ:
-    return typ(types.ProductShape, attrs=(), behaviours=())
+def empty_shape() -> types.Shape:
+    return shape(types.ProductShape)
 
 
 def typecheck(code: str) -> TypeChecker:
-    module = parse(code)
+    module, _, errors = parse(code)
+    assert errors == [], f"Expected no errors, got {errors}"
     result = types.typecheck(module)
     assert errors_str(result.errors) == ""
     return TypeChecker(module, result.type_env)
 
 
 def typecheck_err(code: str) -> tuple[list[error.Error], list[str]]:
-    module = parse(code)
+    module, _, errors = parse(code)
+    assert errors == [], f"Expected no errors, got {errors}"
     result = types.typecheck(module)
     return result.errors, [x.short_message() for x in result.errors]
 
 
 def generate_ir(code: str) -> ir.IR:
-    module = parse(code)
+    module, _, errors = parse(code)
+    assert errors == [], f"Expected no errors, got {errors}"
     result = types.typecheck(module)
     assert errors_str(result.errors) == ""
     return ir.generate_ir(result.fun_specs)
 
 
 def codegen(code: str) -> str:
-    module = parse(code)
+    module, _, errors = parse(code)
+    assert errors == [], f"Expected no errors, got {errors}"
     result = types.typecheck(module)
     assert errors_str(result.errors) == ""
     ir_ = ir.generate_ir(result.fun_specs)
@@ -199,7 +177,7 @@ class TypeChecker:
     module: ast.Module
     type_env: types.TypeEnv
 
-    def type_at[T: types.Typ](self, line: int, col: int, node_typ: type[ast.Node], typ: type[T] | None = None) -> T:
+    def at[T: types.Shape](self, line: int, col: int, node_typ: type[ast.Node], typ: type[T] | None = None) -> T:
         node = self.node_at(line, col, node_typ)
         if typ is not None:
             assert isinstance(self.type_env.get(node), typ), f"Expected {typ}, got {type(self.type_env.get(node))}"
@@ -227,7 +205,7 @@ class TypeChecker:
         def visit(node: ast.Node, _parent: ast.Node | None) -> ast.Node:
             if not isinstance(node, (ast.Module, ast.FunDef)):
                 try:
-                    typ = self.type_env.node_types[node.id]
+                    typ = self.type_env.node_shapes[node.id]
                     lines.append(
                         "\n".join(x.rstrip() for x in node.span.formatted_lines(0, enclosing_empty_lines=False))
                     )

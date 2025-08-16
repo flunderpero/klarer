@@ -61,7 +61,7 @@ class TypecheckStep:
         lines = []
 
         def visit(node: ast.Node, _parent: ast.Node | None) -> ast.Node:
-            typ = self.result.type_env.node_types.get(node.id)
+            typ = self.result.type_env.node_shapes.get(node.id)
             typ_str = str(typ) if typ else "NOT_FOUND"
             node_str = ast.to_str_withoud_nid(node)
             code_str = node.span.lines(0)[1][0].strip()

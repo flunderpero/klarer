@@ -41,7 +41,7 @@ def run_test(case: Case, print_code: str) -> list:
                     if expected_error_message in str(err).split("\n")[0]:
                         # This error is expected.
                         errors = [x for x in errors if x != err]
-                        continue
+                        return []
         return errors
 
     tmp_dir = Path(tempfile.gettempdir(), re.sub(r"[^a-zA-Z0-9]", "_", case.name()))

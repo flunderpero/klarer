@@ -43,6 +43,7 @@ class WithDefinitionError:
     span: Span
     message: str
     defined_here: Span
+    cause: Error | None
     stacktrace: str
 
     def __str__(self) -> str:
@@ -51,7 +52,10 @@ class WithDefinitionError:
         if self.defined_here.start == 0 and self.defined_here.end == 0:
             return s
         defined_here_code = "\n".join(self.defined_here.formatted_lines())
-        return s + f"\nDefined here:\n{defined_here_code}"
+        s += f"\nDefined here:\n{defined_here_code}"
+        if self.cause:
+            s += f"\n    Caused by: {str(self.cause).replace('\n', '\n    ')}"
+        return s
 
     def short_message(self) -> str:
         return self.message
@@ -122,7 +126,7 @@ def undefined_name(name: str, span: Span) -> Error:
 
 
 def no_member(name: str, target: str, span: Span, target_defined_here: Span) -> Error:
-    return WithDefinitionError(span, f"No member `{name}` in type `{target}`", target_defined_here, _stack())
+    return WithDefinitionError(span, f"No member `{name}` in type `{target}`", target_defined_here, None, _stack())
 
 
 def unexpected_shape(expected: str, got: str, span: Span) -> Error:
@@ -133,8 +137,8 @@ def cascaded_error(cause: Error, span: Span) -> Error:
     return CascadedError(span, cause, _stack())
 
 
-def does_not_conform_to(it: str, to: str, span: Span) -> Error:
-    return SimpleError(span, f"`{it}` does not conform to shape `{to}`", _stack())
+def does_not_conform_to(it: str, to: str, span: Span, defined_here: Span, cause: Error | None) -> Error:
+    return WithDefinitionError(span, f"`{it}` does not conform to shape `{to}`", defined_here, cause, _stack())
 
 
 def is_not_same(it: str, as_: str, span: Span) -> Error:
@@ -142,9 +146,55 @@ def is_not_same(it: str, as_: str, span: Span) -> Error:
 
 
 def not_callable(span: Span, defined_here: Span) -> Error:
-    return WithDefinitionError(span, "Only functions and structs can be called", defined_here, _stack())
+    return WithDefinitionError(span, "Only functions and structs can be called", defined_here, None, _stack())
 
 
 def invalid_main(span: Span) -> Error:
     # todo: How to specify the unit type?
     return SimpleError(span, "`main` must conform to the signature `main() -> None`", _stack())
+
+
+def cannot_add_method_to_interface_behaviour(behaviour: str, fun: str, span: Span) -> Error:
+    return SimpleError(span, f"Cannot add method `{fun}` to interface behaviour `{behaviour}`.", _stack())
+
+
+def cannot_add_interface_method_to_non_interface_behaviour(behaviour: str, fun: str, span: Span) -> Error:
+    return SimpleError(span, f"Cannot add interface method `{fun}` to non-interface behaviour `{behaviour}`", _stack())
+
+
+def shape_is_not_a_variant(it: str, sum_shape: str, span: Span, defined_here: Span) -> Error:
+    return WithDefinitionError(span, f"`{it}` is not a variant of `{sum_shape}`", defined_here, None, _stack())
+
+
+def field_not_found(name: str, span: Span, defined_here: Span) -> Error:
+    return WithDefinitionError(span, f"Field `{name}` not found", defined_here, None, _stack())
+
+
+def variant_not_found(variant: str, span: Span, defined_here: Span) -> Error:
+    return WithDefinitionError(span, f"Variant `{variant}` not found", defined_here, None, _stack())
+
+
+def function_result_does_not_conform(self_fun: str, other_fun: str, self_span: Span, other_span: Span) -> Error:
+    return WithDefinitionError(
+        self_span, f"Function result `{self_fun}` does not conform to `{other_fun}`", other_span, None, _stack()
+    )
+
+
+def wrong_number_of_parameters(self_fun: str, other_fun: str, self_span: Span, other_span: Span) -> Error:
+    return WithDefinitionError(
+        self_span,
+        f"Wrong number of parameters for function `{self_fun}` compared to `{other_fun}`",
+        other_span,
+        None,
+        _stack(),
+    )
+
+
+def failed_to_specialize(specialized: str, base: str, self_span: Span, other_span: Span, error: Error) -> Error:
+    return WithDefinitionError(
+        self_span,
+        f"`{base}` cannot be called as `{specialized}`",
+        other_span,
+        error,
+        _stack(),
+    )

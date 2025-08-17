@@ -264,3 +264,64 @@ end
 ```
 PASS
 ```
+
+### Interface Behaviours
+
+```klarer
+@MyToStr.to_str = fun(obj {}) Str
+
+@Value.to_str = fun(obj {value Str}) Str:
+    obj.value
+end
+
+Value = {value Str} + @Value
+
+print_my_to_str = fun(v {} + @MyToStr):
+    print(v.to_str())
+end
+
+main = fun():
+    v = Value{value = "PASS"}
+    print_my_to_str(v)
+end
+```
+
+```
+PASS
+```
+
+**Interface implementations must match the interface at call-site**
+
+```klarer
+@MyToStr.to_str = fun(obj {}) Str
+
+-- Here we return an Int instead of a Str.
+@Value.to_str = fun(obj {value Str}) Int:
+    42
+end
+
+Value = {value Str} + @Value
+
+print_my_to_str = fun(v {} + @MyToStr):
+    print(v.to_str())
+end
+
+main = fun():
+    v = Value{value = "PASS"}
+    print_my_to_str(v) -- ERROR: `fun print_my_to_str(v {}) -> <unit>` cannot be called as `fun print_my_to_str(v Value{value Str}) -> <unit>`
+end
+```
+
+**You cannot mix interface methods with non-interface methods in the same behaviour**
+
+```klarer
+@Value.foo = fun(): end
+
+@Value.bar = fun() Str -- ERROR: Cannot add interface method `fun @Value.bar() -> Str` to non-interface behaviour `@Value`
+```
+
+```klarer
+@Value.bar = fun() Str
+
+@Value.foo = fun(): end -- ERROR: Cannot add method `fun @Value.foo() -> <unit>` to interface behaviour `@Value(interface)`.
+```

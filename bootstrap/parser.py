@@ -295,9 +295,11 @@ class Parser:
             result = self.parse_shape()
             if not result:
                 return None
-        body, _ = self.parse_block()
-        if not body:
-            return None
+        body = None
+        if self.input.peek().kind == token.Kind.colon:
+            body, _ = self.parse_block()
+            if not body:
+                return None
         return ast.FunDef(self.id(), name, behaviour, params, result, body, self.input.span_merge(span))
 
     def parse_if(self) -> ast.If | None:

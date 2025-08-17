@@ -317,12 +317,16 @@ class FunDef:
     behaviour: str | None
     params: list[Param]
     result: Shape
-    body: Block
+    body: Block | None
     span: Span = field(compare=False, hash=False, repr=False)
 
+    def is_behaviour_interface_method(self) -> bool:
+        return self.behaviour is not None and self.body is None
+
     def __str__(self) -> str:
-        ns = (f"@{self.behaviour}.") if self.behaviour is not None else ""
-        return nid(self.id) + f"{ns}{self.name}({', '.join(str(x) for x in self.params)}) {self.result} {self.body}"
+        behaviour = (f"{self.behaviour}.") if self.behaviour is not None else ""
+        body = "" if self.body is None else f" {self.body}"
+        return nid(self.id) + f"{behaviour}{self.name}({', '.join(str(x) for x in self.params)}) {self.result}{body}"
 
 
 @dataclass
@@ -365,7 +369,8 @@ def walk(node: Node, visit_: ASTVisitor) -> bool:
             for i, param in enumerate(node.params):
                 node.params[i] = cast(Param, visit(param, node))
             node.result = cast(Shape, visit(node.result, node))
-            node.body = cast(Block, visit(node.body, node))
+            if node.body:
+                node.body = cast(Block, visit(node.body, node))
         case Call():
             node.callee = cast(Expr, visit(node.callee, node))
             for i, arg in enumerate(node.args):

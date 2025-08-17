@@ -507,6 +507,7 @@ class FunGen:
             case ast.FunDef():
                 ast.walk(node, self.generate)
                 if self.block.terminator is None:
+                    assert node.body, f"Expected body for {node}"
                     reg = NoneReg if isinstance(self.fun_ir.result, NoneTyp) else self.node_regs[node.body.id]
                     self.block.terminator = Return(reg)
             case ast.Block():

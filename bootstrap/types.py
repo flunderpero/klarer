@@ -16,12 +16,11 @@ if TYPE_CHECKING:
 class Behaviour:
     name: str
     funs: tuple[FunShape, ...]
+    interface: bool
 
     def __str__(self) -> str:
-        return self.name
-
-    def is_same(self, other: Behaviour) -> bool:
-        return self.name == other.name
+        interface = "(interface)" if self.interface else ""
+        return self.name + interface
 
     def mangled_name(self) -> str:
         return self.name
@@ -37,38 +36,26 @@ class Behaviour:
 class Behaviours:
     behaviours: tuple[Behaviour, ...]
 
-    def is_same(self, other: Behaviours) -> bool:
-        """Two behaviours are the same if the resulting functions are the same.
-        If both, behaviour A and B expose a function x, then the order of A and B
-        is important.
-        """
-        self_funs = self.functions()
-        other_funs = other.functions()
-        if len(self_funs) != len(other_funs):
-            return False
-        for self_fun, other_fun in zip(self_funs, other_funs):
-            if not self_fun[0].is_same(other_fun[0]) or self_fun[1].is_same(other_fun[1]):
-                return False
-        return True
+    # def not_conforms_to(self, other: Behaviours) -> error.Error | None:
+    #     """`self` conforms to `other` if it has at least all the behaviour _function_ of `other`."""
+    #     self_funs = self.functions()
+    #     other_funs = other.functions()
+    #     for other_fun in other_funs:
+    #         # Find a function with the same name in `self_funs`.
+    #         self_fun = next((x for x in self_funs if x.name == other_fun.name), None)
+    #         if not self_fun:
+    #             return error.behaviour_method_not_found(str(other_fun), other_fun.span)
+    #         if not self_fun.not_conforms_to(other_fun):
+    #             return error.behaviour_method_does_not_conform(
+    #                 str(self_fun), str(other_fun), self_fun.span, other_fun.span
+    #             )
+    #     return None
 
-    def conforms_to(self, other: Behaviours) -> bool:
-        """`self` conforms to `other` if it has at least all the behaviours of `other`
-        in the same order.
-        """
-        self_funs = self.functions()
-        other_funs = other.functions()
-        if len(self_funs) < len(other_funs):
-            return False
-        for behaviour, fun in other_funs:
-            if not any(x[0].is_same(behaviour) and x[1].is_same(fun) for x in self_funs):
-                return False
-        return True
-
-    def functions(self) -> tuple[tuple[Behaviour, FunShape], ...]:
+    def functions(self) -> tuple[FunShape, ...]:
         funs = set()
         for behaviour in self.behaviours:
             for fun in behaviour.funs:
-                funs.add((behaviour, fun))
+                funs.add(fun)
         return tuple(funs)
 
     def fun(self, name: str) -> FunShape | None:
@@ -98,21 +85,21 @@ class PrimitiveShape:
     def __str__(self) -> str:
         return self.name
 
-    def is_same(self, other: Shape) -> bool:
-        # Behaviours of primitives are guaranteed to be the same.
-        return isinstance(other, PrimitiveShape) and self.name == other.name
-
     def mangled_name(self) -> str:
         return self.name
 
-    def conforms_to(self, other: Shape) -> bool:
+    def not_conforms_to(self, other: Shape) -> error.Error | None:
         # For now, all primitives only conform to themselves, a sum shape, or the empty shape.
         # Later on, when we have different sized integers, I8 will conform to I16, etc.
-        if self.is_same(other):
-            return True
-        if isinstance(other, SumShape):
-            return any(self.conforms_to(x) for x in other.variants)
-        return isinstance(other, ProductShape) and other.is_empty()
+        if self == other:
+            return None
+        if isinstance(other, ProductShape) and other.is_empty():
+            return None
+        if not isinstance(other, SumShape):
+            return error.does_not_conform_to(str(self), str(other), self.span, other.span, None)
+        if not any(not self.not_conforms_to(x) for x in other.variants):
+            return error.shape_is_not_a_variant(str(self), str(other), self.span, other.span)
+        return None
 
 
 @dataclass(eq=True, frozen=True)
@@ -121,16 +108,15 @@ class UnitShape:
     span: Span = field(compare=False, hash=False, repr=False)
 
     def __str__(self) -> str:
-        return "_Unit"
-
-    def is_same(self, other: Shape) -> bool:
-        return isinstance(other, UnitShape)
+        return "<unit>"
 
     def mangled_name(self) -> str:
-        return "_Unit"
+        return "_unit_"
 
-    def conforms_to(self, other: Shape) -> bool:
-        return isinstance(other, UnitShape)
+    def not_conforms_to(self, other: Shape) -> error.Error | None:
+        if not isinstance(other, UnitShape):
+            return error.unexpected_shape("<unit>", str(other), other.span)
+        return None
 
 
 @dataclass(eq=True, frozen=True)
@@ -141,14 +127,8 @@ class Field:
     def __str__(self) -> str:
         return self.name + " " + str(self.shape)
 
-    def is_same(self, other: Field) -> bool:
-        return self.name == other.name and self.shape.is_same(other.shape)
-
     def mangled_name(self) -> str:
         return self.name + "_" + self.shape.mangled_name()
-
-    def conforms_to(self, other: Field) -> bool:
-        return self.name == other.name and self.shape.conforms_to(other.shape)
 
 
 def same_tuple(a: tuple[Any, ...], b: tuple[Any, ...]) -> bool:
@@ -181,13 +161,6 @@ class ProductShape:
         fields = ", ".join(str(x) for x in self.fields)
         return f"{name}{{{fields}}}"
 
-    def is_same(self, other: Shape) -> bool:
-        return (
-            isinstance(other, ProductShape)
-            and same_tuple(self.fields, other.fields)
-            and self.behaviours.is_same(other.behaviours)
-        )
-
     @property
     def fields_sorted(self) -> tuple[Field, ...]:
         return tuple(sorted(self.fields, key=lambda x: x.name))
@@ -201,9 +174,9 @@ class ProductShape:
     def is_empty(self) -> bool:
         return not self.fields
 
-    def conforms_to(self, other: Shape) -> bool:
+    def not_conforms_to(self, other: Shape) -> error.Error | None:
         """A product shape conforms the other shape if it has at least all the
-        fields of the other shape and the behaviours conform.
+        fields of the other shape conform.
 
         The empty shape `{}` conforms any other shape.
 
@@ -215,17 +188,21 @@ class ProductShape:
         if any of the variants conform to the product shape.
 
         """
-        if isinstance(other, SumShape):
-            return any(x.conforms_to(other) for x in other.variants)
+        if isinstance(other, SumShape) and not any(x.not_conforms_to(other) for x in other.variants):
+            return error.shape_is_not_a_variant(str(other), str(self), other.span, self.span)
 
         if not isinstance(other, ProductShape):
-            return False
-
-        if not self.behaviours.conforms_to(other.behaviours):
-            return False
+            return error.unexpected_shape("a product shape", str(other), other.span)
 
         # All fields of `other` must be present in `self`.
-        return all(any(s.conforms_to(o) for s in self.fields) for o in other.fields)
+        for other_field in other.fields:
+            # Find a field with the same name in `self.fields`.
+            self_field = next((x for x in self.fields if x.name == other_field.name), None)
+            if not self_field:
+                return error.field_not_found(other_field.name, self.span, other_field.shape.span)
+            if err := self_field.shape.not_conforms_to(other_field.shape):
+                return err
+        return None
 
 
 @dataclass(eq=True, frozen=True, repr=False)
@@ -240,36 +217,29 @@ class SumShape:
         name = f" {self.name}" if self.name else ""
         return f"{name} {variants}"
 
-    def is_same(self, other: Shape) -> bool:
-        return (
-            isinstance(other, SumShape)
-            and same_tuple(self.variants, other.variants)
-            and self.behaviours.is_same(other.behaviours)
-        )
-
     def mangled_name(self) -> str:
         name = [x.mangled_name() for x in sorted_tuple(self.variants)]
         if self.name:
             return self.name + "_" + "_".join(name)
         return "_".join(name)
 
-    def conforms_to(self, other: Shape) -> bool:
+    def not_conforms_to(self, other: Shape) -> error.Error | None:
         """A sum shape conforms the other shape if it has at least all the
-        variants of the other shape and the behaviours conform.
+        variants of the other shape conform.
 
         A sum shape also conforms to the empty shape `{}`.
         """
         if isinstance(other, ProductShape) and other.is_empty():
-            return True
+            return None
 
         if not isinstance(other, SumShape):
-            return False
-
-        if not self.behaviours.conforms_to(other.behaviours):
-            return False
+            return error.unexpected_shape("a sum shape", str(other), other.span)
 
         # All variants of `other` must be present in `self`.
-        return all(any(x.conforms_to(variant) for x in self.variants) for variant in other.variants)
+        for other_variant in other.variants:
+            if not any(self_variant.not_conforms_to(other_variant) for self_variant in self.variants):
+                return error.variant_not_found(str(other_variant), self.span, other_variant.span)
+        return None
 
 
 @dataclass(eq=True, frozen=True)
@@ -280,14 +250,8 @@ class Param:
     def __str__(self) -> str:
         return self.name + " " + str(self.shape)
 
-    def is_same(self, other: Param) -> bool:
-        return self.shape.is_same(other.shape)
-
     def mangled_name(self) -> str:
         return self.name + "_" + self.shape.mangled_name()
-
-    def conforms_to(self, other: Param) -> bool:
-        return self.shape.conforms_to(other.shape)
 
 
 @dataclass(eq=True, frozen=True)
@@ -309,13 +273,6 @@ class FunShape:
         name = f" {self.behaviour}.{name[1:]}" if self.behaviour else name
         return f"fun{name}({params}) -> {self.result}"
 
-    def is_same(self, other: Shape) -> bool:
-        return (
-            isinstance(other, FunShape)
-            and all(x.is_same(y) for x, y in zip(self.params, other.params))
-            and self.result.is_same(other.result)
-        )
-
     def mangled_name(self) -> str:
         if self.builtin:
             assert self.name is not None
@@ -328,7 +285,7 @@ class FunShape:
             name = self.behaviour[1:] + "__" + name
         return name + "_".join(params)
 
-    def conforms_to(self, other: Shape) -> bool:
+    def not_conforms_to(self, other: Shape) -> error.Error | None:
         """A function conforms the empty shape or another function if all
         its parameters and result conform the other function's parameters and result.
 
@@ -337,17 +294,19 @@ class FunShape:
 
         """
         if isinstance(other, ProductShape) and other.is_empty():
-            return True
+            return None
         if not isinstance(other, FunShape):
-            return False
+            return error.unexpected_shape("a function", str(other), other.span)
+        if self.result.not_conforms_to(other.result):
+            return error.function_result_does_not_conform(
+                str(self.result), str(other.result), self.result.span, other.result.span
+            )
         if len(self.params) != len(other.params):
-            return False
-        if not self.result.conforms_to(other.result):
-            return False
-        for param, other_param in zip(self.params, other.params):  # noqa: SIM110
-            if not param.conforms_to(other_param):
-                return False
-        return True
+            return error.wrong_number_of_parameters(str(self), str(other), self.span, other.span)
+        for self_param, other_param in zip(self.params, other.params):
+            if err := self_param.shape.not_conforms_to(other_param.shape):
+                return err
+        return None
 
 
 @dataclass(eq=True, frozen=True)
@@ -361,14 +320,11 @@ class ErrorShape:
     def __str__(self) -> str:
         return str(self.error)
 
-    def is_same(self, _other: Shape) -> bool:
-        return False
-
     def mangled_name(self) -> str:
         return "Error"
 
-    def conforms_to(self, _other: Shape) -> bool:
-        return False
+    def not_conforms_to(self, _other: Shape) -> error.Error | None:
+        return self.error
 
 
 Shape = PrimitiveShape | ProductShape | SumShape | FunShape | UnitShape | ErrorShape
@@ -542,18 +498,31 @@ class TypeCheck:
 
             spec = FunSpec(self.type_env, fun_def, base, specialized)
 
-            if not spec.specialized.conforms_to(spec.base):
-                return self.error(error.does_not_conform_to(str(spec.specialized), str(spec.base), span))
-
             log(
                 "typechecker-mono",
                 f"Type checking {spec.base} at {spec.fun_def.span} with {spec.specialized} at call-site {span}",
                 self.nesting_level,
             )
+            error_mark = len(self.errors)
             shape = self.tc_fun_def_specialized(spec.fun_def, spec.specialized)
+            if len(self.errors) > error_mark:
+                # Rewind the error stack to the point where we started.
+                errors = self.errors[error_mark:]
+                self.errors = self.errors[:error_mark]
+                self.error(
+                    error.failed_to_specialize(str(spec.specialized), str(spec.base), span, spec.base.span, errors[0])
+                )
             if isinstance(shape, ErrorShape):
                 return ErrorShape(error.cascaded_error(shape.error, span))
             spec.specialized = replace(spec.specialized, result=shape.result)
+            if err := spec.specialized.not_conforms_to(spec.base):
+                return self.error(
+                    error.does_not_conform_to(str(spec.specialized), str(spec.base), span, spec.base.span, err)
+                )
+
+            if fun_def.body is None:
+                # This is an interface method.
+                return spec
             log(
                 "typechecker-mono",
                 f"<<< Specialized {spec.base} at call-site {span} as {spec.specialized}",
@@ -591,11 +560,6 @@ class TypeCheck:
         value = self.type_env.get(node.value)
         if isinstance(value, ErrorShape):
             return value
-        # binding = self.scope.lookup(node.target.name)
-        # if binding is not None:
-        #     if not binding.shape.is_same(value):
-        #         return self.error(error.is_not_same(str(value), str(binding.shape), node.target.span))
-        # else:
         log("typechecker-trace", f"Binding {node.target.name} to {value}", self.nesting_level)
         self.scope.bind(node.target.name, value)
         self.type_env.set(node.target, value)
@@ -619,8 +583,8 @@ class TypeCheck:
             return lhs
         if isinstance(rhs, ErrorShape):
             return rhs
-        if not rhs.conforms_to(lhs):
-            return self.error(error.does_not_conform_to(str(rhs), str(lhs), node.span))
+        if err := rhs.not_conforms_to(lhs):
+            return self.error(error.does_not_conform_to(str(rhs), str(lhs), rhs.span, lhs.span, err))
         return Bool
 
     def tc_block(self, node: ast.Block) -> Shape:
@@ -641,8 +605,8 @@ class TypeCheck:
         # Build a specialized function if it is not a builtin.
         if callee.builtin:
             specialized = self.build_specialized(callee, node.args)
-            if not specialized.conforms_to(callee):
-                return self.error(error.does_not_conform_to(str(specialized), str(callee), node.span))
+            if err := specialized.not_conforms_to(callee):
+                return self.error(error.does_not_conform_to(str(specialized), str(callee), node.span, callee.span, err))
             return callee.result
 
         args = node.args
@@ -668,19 +632,44 @@ class TypeCheck:
                 if err := self.scope.bind(param.name, param_shape):
                     return self.error(err)
                 params.append(Param(param.name, param_shape))
-            self.visit(node.body, node)
+            if node.body:
+                self.visit(node.body, node)
         self.visit(node.result, node)
         return_shape = self.type_env.get(node.result)
         if isinstance(return_shape, ErrorShape):
             return return_shape
-        body_shape = self.type_env.get(node.body)
-        if isinstance(body_shape, ErrorShape):
-            return body_shape
-        if not body_shape.conforms_to(return_shape):
-            return self.error(error.does_not_conform_to(str(body_shape), str(return_shape), node.span))
         shape = FunShape(node.name, (*params,), return_shape, node.behaviour, node.span, builtin=False)
         log("typechecker-trace", f"Adding {shape} to fun_defs", self.nesting_level)
         self.fun_defs[shape] = node
+        if node.behaviour:
+            behaviour = self.behaviours.get(node.behaviour)
+            behaviour_funs = []
+            if behaviour:
+                if behaviour.interface != node.is_behaviour_interface_method():
+                    if behaviour.interface:
+                        return self.error(
+                            error.cannot_add_method_to_interface_behaviour(str(behaviour), str(shape), node.span)
+                        )
+                    return self.error(
+                        error.cannot_add_interface_method_to_non_interface_behaviour(
+                            str(behaviour), str(shape), node.span
+                        )
+                    )
+                behaviour_funs = list(behaviour.funs)
+            behaviour_funs.append(shape)
+            self.behaviours[node.behaviour] = Behaviour(
+                node.behaviour, tuple(behaviour_funs), node.is_behaviour_interface_method()
+            )
+        if node.body is None:
+            # This is an interface method.
+            return shape
+        body_shape = self.type_env.get(node.body)
+        if isinstance(body_shape, ErrorShape):
+            return body_shape
+        if err := body_shape.not_conforms_to(return_shape):
+            return self.error(
+                error.does_not_conform_to(str(body_shape), str(return_shape), node.span, return_shape.span, err)
+            )
         if err := self.scope.bind(node.name, shape):
             return self.error(err)
         if node.name == "main":
@@ -691,13 +680,6 @@ class TypeCheck:
                     return ErrorShape(error.cascaded_error(fun.result.error, node.span))
                 return self.error(error.invalid_main(node.span))
             self.fun_specs[fun] = [FunSpec(self.type_env, node, fun, fun)]
-        if node.behaviour:
-            behaviour = self.behaviours.get(node.behaviour)
-            behaviour_funs = []
-            if behaviour:
-                behaviour_funs = list(behaviour.funs)
-            behaviour_funs.append(shape)
-            self.behaviours[node.behaviour] = Behaviour(node.behaviour, tuple(behaviour_funs))
         return shape
 
     def tc_fun_def_specialized(self, node: ast.FunDef, fun: FunShape) -> FunShape | ErrorShape:
@@ -706,7 +688,7 @@ class TypeCheck:
                 if err := self.scope.bind(param.name, param.shape):
                     return self.error(err)
             ast.walk(node, self.visit)
-        return_typ = self.type_env.get(node.body)
+        return_typ = self.type_env.get(node.body) if node.body else fun.result
         return replace(fun, result=return_typ)
 
     def tc_fun_param(self, node: ast.Param) -> Shape:
@@ -735,12 +717,12 @@ class TypeCheck:
         shape = self.type_env.get(node.arms[0])
         for arm in node.arms:
             arm_shape = self.tc_if_arm(arm)
-            if not shape.is_same(arm_shape):
+            if shape != arm_shape:
                 return self.error(error.is_not_same(str(shape), str(arm_shape), arm.span))
         if node.else_block:
             else_shape = self.tc_block(node.else_block)
             # todo: if/else with different types should create a union type.
-            if not shape.is_same(else_shape):
+            if shape != else_shape:
                 return self.error(error.is_not_same(str(shape), str(else_shape), node.span))
         return shape
 
@@ -834,8 +816,10 @@ class TypeCheck:
                 return shape_ref
             if not isinstance(shape_ref, FunShape):
                 shape = replace(shape, behaviours=shape.behaviours.merge(shape_ref.behaviours))
-            if not shape.conforms_to(shape_ref):
-                return self.error(error.does_not_conform_to(str(shape), node.shape_ref.name, node.span))
+            if err := shape.not_conforms_to(shape_ref):
+                return self.error(
+                    error.does_not_conform_to(str(shape), node.shape_ref.name, node.span, node.shape_ref.span, err)
+                )
             shape = replace(shape, name=node.shape_ref.name)
         return shape
 

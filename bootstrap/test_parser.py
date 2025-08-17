@@ -30,20 +30,20 @@ def test_complex_fun_def() -> None:
         ast.FunDef,
         name="foo",
         params=[
-            node(ast.FunParam, name="a", shape=str_shape),
+            node(ast.Param, name="a", shape=str_shape),
             node(
-                ast.FunParam,
+                ast.Param,
                 name="b",
                 shape=node(
                     ast.ProductShape,
-                    attrs=[node(ast.Attr, name="value", shape=str_shape)],
+                    fields=[node(ast.Field, name="value", shape=str_shape)],
                     behaviours=[node(ast.Behaviour, name="Value")],
                 ),
             ),
         ],
         result=node(
             ast.ProductShape,
-            attrs=[node(ast.Attr, name="value", shape=str_shape)],
+            fields=[node(ast.Field, name="value", shape=str_shape)],
             behaviours=[node(ast.Behaviour, name="Value")],
         ),
         body=node(ast.Block, nodes=[]),
@@ -54,8 +54,8 @@ def test_fun_shapes() -> None:
     assert parse_shape_alias("Foo = fun(a Int, b Str) Bool", "Foo") == node(
         ast.FunShape,
         params=[
-            node(ast.Attr, name="a", shape=int_shape),
-            node(ast.Attr, name="b", shape=str_shape),
+            node(ast.Param, name="a", shape=int_shape),
+            node(ast.Param, name="b", shape=str_shape),
         ],
         result=bool_shape,
     )
@@ -67,7 +67,7 @@ def test_shape_alias() -> None:
 
 def test_product_shapes() -> None:
     assert parse_shape_alias("Foo = {a Int}", "Foo") == node(
-        ast.ProductShape, attrs=[node(ast.Attr, name="a", shape=int_shape)]
+        ast.ProductShape, fields=[node(ast.Field, name="a", shape=int_shape)]
     )
 
 
@@ -81,18 +81,18 @@ def test_complex_shapes() -> None:
         variants=[
             node(
                 ast.ProductShape,
-                attrs=[node(ast.Attr, name="a", shape=int_shape), node(ast.Attr, name="b", shape=str_shape)],
+                fields=[node(ast.Field, name="a", shape=int_shape), node(ast.Field, name="b", shape=str_shape)],
             ),
             int_shape,
             node(
                 ast.ProductShape,
-                attrs=[
+                fields=[
                     node(
-                        ast.Attr,
+                        ast.Field,
                         name="c",
                         shape=node(
                             ast.ProductShape,
-                            attrs=[node(ast.Attr, name="d", shape=bool_shape)],
+                            fields=[node(ast.Field, name="d", shape=bool_shape)],
                             behaviours=[node(ast.Behaviour, name="Bar")],
                         ),
                     )
@@ -111,7 +111,7 @@ def test_behaviour_has_to_come_after_composition() -> None:
 
 def test_shape_product_literal_basics() -> None:
     assert parse_first("{a = 42}") == node(
-        ast.ShapeLit, attrs=[node(ast.ShapeLitAttr, name="a", value=node(ast.IntLit, value=42))]
+        ast.ShapeLit, fields=[node(ast.ShapeLitField, name="a", value=node(ast.IntLit, value=42))]
     )
 
 
@@ -119,14 +119,14 @@ def test_shape_product_literal_with_shape_ref() -> None:
     assert parse_first("Foo{a = 42}") == node(
         ast.ShapeLit,
         shape_ref=node(ast.ShapeRef, name="Foo"),
-        attrs=[node(ast.ShapeLitAttr, name="a", value=node(ast.IntLit, value=42))],
+        fields=[node(ast.ShapeLitField, name="a", value=node(ast.IntLit, value=42))],
     )
 
 
 def test_shape_literal_with_behaviour() -> None:
     assert parse_first("{a = 42} + @Foo") == node(
         ast.ShapeLit,
-        attrs=[node(ast.ShapeLitAttr, name="a", value=node(ast.IntLit, value=42))],
+        fields=[node(ast.ShapeLitField, name="a", value=node(ast.IntLit, value=42))],
         behaviours=[node(ast.Behaviour, name="Foo")],
     )
 
@@ -134,17 +134,17 @@ def test_shape_literal_with_behaviour() -> None:
 def test_composite_product_shape_literal() -> None:
     assert parse_first("{a = {b = 42} + Foo{c = 137} + @Bar}") == node(
         ast.ShapeLit,
-        attrs=[
+        fields=[
             node(
-                ast.ShapeLitAttr,
+                ast.ShapeLitField,
                 name="a",
                 value=node(
                     ast.ShapeLit,
-                    attrs=[node(ast.ShapeLitAttr, name="b", value=node(ast.IntLit, value=42))],
+                    fields=[node(ast.ShapeLitField, name="b", value=node(ast.IntLit, value=42))],
                     composites=[
                         node(
                             ast.ShapeLit,
-                            attrs=[node(ast.ShapeLitAttr, name="c", value=node(ast.IntLit, value=137))],
+                            fields=[node(ast.ShapeLitField, name="c", value=node(ast.IntLit, value=137))],
                             shape_ref=node(ast.ShapeRef, name="Foo"),
                         )
                     ],
@@ -217,7 +217,7 @@ def test_behaviour_fun_def() -> None:
             ast.FunDef,
             name="bar",
             namespace="Foo",
-            params=[node(ast.FunParam, name="foo", shape=str_shape)],
+            params=[node(ast.Param, name="foo", shape=str_shape)],
             result=unit_shape,
             body=node(ast.Block, nodes=[]),
         )

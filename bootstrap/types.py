@@ -134,20 +134,20 @@ class UnitShape:
 
 
 @dataclass(eq=True, frozen=True)
-class Attr:
+class Field:
     name: str
     shape: Shape
 
     def __str__(self) -> str:
         return self.name + " " + str(self.shape)
 
-    def is_same(self, other: Attr) -> bool:
+    def is_same(self, other: Field) -> bool:
         return self.name == other.name and self.shape.is_same(other.shape)
 
     def mangled_name(self) -> str:
         return self.name + "_" + self.shape.mangled_name()
 
-    def conforms_to(self, other: Attr) -> bool:
+    def conforms_to(self, other: Field) -> bool:
         return self.name == other.name and self.shape.conforms_to(other.shape)
 
 
@@ -162,7 +162,7 @@ def sorted_tuple(a: tuple[Any, ...]) -> tuple[Any, ...]:
 @dataclass(eq=True, frozen=True)
 class ProductShape:
     name: str | None
-    attrs: tuple[Attr, ...]
+    fields: tuple[Field, ...]
     behaviours: Behaviours
     span: Span = field(compare=False, hash=False, repr=False)
 
@@ -173,37 +173,37 @@ class ProductShape:
     def is_named(self) -> bool:
         return self.name is not None
 
-    def attr(self, name: str) -> Attr | None:
-        return next((x for x in self.attrs if x.name == name), None)
+    def field(self, name: str) -> Field | None:
+        return next((x for x in self.fields if x.name == name), None)
 
     def __str__(self) -> str:
         name = f"{self.name}" if self.name else ""
-        attrs = ", ".join(str(x) for x in self.attrs)
-        return f"{name}{{{attrs}}}"
+        fields = ", ".join(str(x) for x in self.fields)
+        return f"{name}{{{fields}}}"
 
     def is_same(self, other: Shape) -> bool:
         return (
             isinstance(other, ProductShape)
-            and same_tuple(self.attrs, other.attrs)
+            and same_tuple(self.fields, other.fields)
             and self.behaviours.is_same(other.behaviours)
         )
 
     @property
-    def attrs_sorted(self) -> tuple[Attr, ...]:
-        return tuple(sorted(self.attrs, key=lambda x: x.name))
+    def fields_sorted(self) -> tuple[Field, ...]:
+        return tuple(sorted(self.fields, key=lambda x: x.name))
 
     def mangled_name(self) -> str:
-        name = [x.mangled_name() for x in sorted_tuple(self.attrs)]
+        name = [x.mangled_name() for x in sorted_tuple(self.fields)]
         if self.name:
             return self.name + "_" + "_".join(name)
         return "_".join(name)
 
     def is_empty(self) -> bool:
-        return not self.attrs
+        return not self.fields
 
     def conforms_to(self, other: Shape) -> bool:
         """A product shape conforms the other shape if it has at least all the
-        attributes of the other shape and the behaviours conform.
+        fields of the other shape and the behaviours conform.
 
         The empty shape `{}` conforms any other shape.
 
@@ -224,8 +224,8 @@ class ProductShape:
         if not self.behaviours.conforms_to(other.behaviours):
             return False
 
-        # All attributes of `other` must be present in `self`.
-        return all(any(x.conforms_to(attr) for x in self.attrs) for attr in other.attrs)
+        # All fields of `other` must be present in `self`.
+        return all(any(s.conforms_to(o) for s in self.fields) for o in other.fields)
 
 
 @dataclass(eq=True, frozen=True, repr=False)
@@ -273,27 +273,27 @@ class SumShape:
 
 
 @dataclass(eq=True, frozen=True)
-class FunParam:
+class Param:
     name: str
     shape: Shape
 
     def __str__(self) -> str:
         return self.name + " " + str(self.shape)
 
-    def is_same(self, other: FunParam) -> bool:
+    def is_same(self, other: Param) -> bool:
         return self.shape.is_same(other.shape)
 
     def mangled_name(self) -> str:
         return self.name + "_" + self.shape.mangled_name()
 
-    def conforms_to(self, other: FunParam) -> bool:
+    def conforms_to(self, other: Param) -> bool:
         return self.shape.conforms_to(other.shape)
 
 
 @dataclass(eq=True, frozen=True)
 class FunShape:
     name: str | None
-    params: tuple[FunParam, ...]
+    params: tuple[Param, ...]
     result: Shape
     namespace: str | None
     span: Span = field(compare=False, hash=False, repr=False)
@@ -427,19 +427,19 @@ class Scope:
         fun_defaults = {"namespace": None, "span": span, "builtin": True}
         scope = Scope(None, None, {})
         scope.bindings["print"] = Binding(
-            FunShape("print", (FunParam("s", Str),), Unit, **fun_defaults),
+            FunShape("print", (Param("s", Str),), Unit, **fun_defaults),
             **binding_defaults,
         )
         scope.bindings["int_to_str"] = Binding(
-            FunShape("int_to_str", (FunParam("i", Int),), Str, **fun_defaults),
+            FunShape("int_to_str", (Param("i", Int),), Str, **fun_defaults),
             **binding_defaults,
         )
         scope.bindings["char_to_str"] = Binding(
-            FunShape("char_to_str", (FunParam("c", Char),), Str, **fun_defaults),
+            FunShape("char_to_str", (Param("c", Char),), Str, **fun_defaults),
             **binding_defaults,
         )
         scope.bindings["bool_to_str"] = Binding(
-            FunShape("bool_to_str", (FunParam("b", Bool),), Str, **fun_defaults),
+            FunShape("bool_to_str", (Param("b", Bool),), Str, **fun_defaults),
             **binding_defaults,
         )
         scope.bindings["Int"] = Binding(Int, **binding_defaults)
@@ -543,10 +543,10 @@ class TypeCheck:
 
             base = self.type_env.get(fun_def)
             assert isinstance(base, FunShape)
-            params: list[FunParam] = []
+            params: list[Param] = []
             for param, arg in zip(fun.params, call_args):
                 shape = self.type_env.get(arg)
-                params.append(FunParam(param.name, shape))
+                params.append(Param(param.name, shape))
             specialized = FunShape(fun.name, tuple(params), base.result, fun.namespace, fun.span, builtin=fun.builtin)
 
             spec = FunSpec(self.type_env, fun_def, base, specialized)
@@ -610,12 +610,12 @@ class TypeCheck:
         self.type_env.set(node.target, value)
         return Unit
 
-    def tc_attr(self, node: ast.Attr) -> Shape:
+    def tc_field(self, node: ast.Field) -> Shape:
         ast.walk(node, self.visit)
         shape = self.type_env.get(node.shape)
         if isinstance(shape, ErrorShape):
             return shape
-        return ProductShape(None, (Attr(node.name, shape),), Behaviours(()), node.span)
+        return ProductShape(None, (Field(node.name, shape),), Behaviours(()), node.span)
 
     def tc_behaviour(self, _node: ast.Behaviour) -> Shape:
         return Unit
@@ -666,14 +666,14 @@ class TypeCheck:
         return callee.result
 
     def tc_fun_def(self, node: ast.FunDef) -> Shape:
-        params: list[FunParam] = []
+        params: list[Param] = []
         with self.child_scope(node):
             for param in node.params:
                 self.visit(param, node)
                 param_shape = self.type_env.get(param)
                 if err := self.scope.bind(param.name, param_shape, is_fun_param=True):
                     return self.error(err)
-                params.append(FunParam(param.name, param_shape))
+                params.append(Param(param.name, param_shape))
             self.visit(node.body, node)
         self.visit(node.result, node)
         return_shape = self.type_env.get(node.result)
@@ -715,7 +715,7 @@ class TypeCheck:
         return_typ = self.type_env.get(node.body)
         return replace(fun, result=return_typ)
 
-    def tc_fun_param(self, node: ast.FunParam) -> Shape:
+    def tc_fun_param(self, node: ast.Param) -> Shape:
         ast.walk(node, self.visit)
         shape = self.type_env.get(node.shape)
         if isinstance(shape, ErrorShape):
@@ -724,12 +724,12 @@ class TypeCheck:
 
     def tc_fun_shape(self, node: ast.FunShape) -> Shape:
         ast.walk(node, self.visit)
-        params: list[FunParam] = []
+        params: list[Param] = []
         for param in node.params:
             shape = self.type_env.get(param.shape)
             if isinstance(shape, ErrorShape):
                 return shape
-            params.append(FunParam(param.name, shape))
+            params.append(Param(param.name, shape))
         result = self.type_env.get(node.result)
         if isinstance(result, ErrorShape):
             return result
@@ -768,9 +768,9 @@ class TypeCheck:
             return behaviour_fun
         if not isinstance(shape, ProductShape):
             return self.error(error.unexpected_shape(f"a shape with field `{node.name}`", str(shape), node.target.span))
-        attr = shape.attr(node.name)
-        if attr:
-            return attr.shape
+        field = shape.field(node.name)
+        if field:
+            return field.shape
         if behaviour_fun:
             return behaviour_fun
         return self.error(error.no_member(node.name, str(shape), node.target.span, node.span))
@@ -787,19 +787,19 @@ class TypeCheck:
 
     def tc_product_shape(self, node: ast.ProductShape) -> Shape:
         ast.walk(node, self.visit)
-        attrs: list[Attr] = []
-        for attr in node.attrs:
-            shape = self.type_env.get(attr.shape)
+        fields: list[Field] = []
+        for field in node.fields:
+            shape = self.type_env.get(field.shape)
             if isinstance(shape, ErrorShape):
                 return shape
-            attrs.append(Attr(attr.name, shape))
+            fields.append(Field(field.name, shape))
         behaviours = []
         for behaviour_node in node.behaviours:
             behaviour = self.behaviours.get(behaviour_node.name)
             if not behaviour:
                 return self.error(error.undefined_name(behaviour_node.name, behaviour_node.span))
             behaviours.append(behaviour)
-        return ProductShape(None, tuple(attrs), Behaviours(tuple(behaviours)), node.span)
+        return ProductShape(None, tuple(fields), Behaviours(tuple(behaviours)), node.span)
 
     def tc_shape(self, node: ast.Shape) -> Shape:
         ast.walk(node, self.visit)
@@ -807,13 +807,13 @@ class TypeCheck:
 
     def tc_shape_lit(self, node: ast.ShapeLit) -> Shape:
         ast.walk(node, self.visit)
-        attrs = []
-        for attr in node.attrs:
-            self.visit(attr, node)
-            shape = self.type_env.get(attr.value)
+        fields = []
+        for field in node.fields:
+            self.visit(field, node)
+            shape = self.type_env.get(field.value)
             if isinstance(shape, ErrorShape):
                 return shape
-            attrs.append(Attr(attr.name, shape))
+            fields.append(Field(field.name, shape))
         behaviours = []
         for behaviour_node in node.behaviours:
             behaviour = self.behaviours.get(behaviour_node.name)
@@ -826,14 +826,14 @@ class TypeCheck:
                 return composite
             assert isinstance(composite, ProductShape)
             assert not composite.behaviours
-            # Merge attributes from composite into the shape.
-            for composite_attr in composite.attrs:
-                index = attrs.index(composite_attr)
+            # Merge fields from composite into the shape.
+            for composite_fields in composite.fields:
+                index = fields.index(composite_fields)
                 if index < 0:
-                    attrs.append(composite_attr)
+                    fields.append(composite_fields)
                 else:
-                    attrs[index] = composite_attr
-        shape = ProductShape(None, tuple(attrs), Behaviours(tuple(behaviours)), node.span)
+                    fields[index] = composite_fields
+        shape = ProductShape(None, tuple(fields), Behaviours(tuple(behaviours)), node.span)
         if node.shape_ref:
             shape_ref = self.type_env.get(node.shape_ref)
             if isinstance(shape_ref, ErrorShape):
@@ -845,7 +845,7 @@ class TypeCheck:
             shape = replace(shape, name=node.shape_ref.name)
         return shape
 
-    def tc_shape_lit_attr(self, node: ast.ShapeLitAttr) -> Shape:
+    def tc_shape_lit_field(self, node: ast.ShapeLitField) -> Shape:
         ast.walk(node, self.visit)
         return Unit
 
@@ -880,8 +880,8 @@ class TypeCheck:
         match node:
             case ast.Assign():
                 shape = self.tc_assign(node)
-            case ast.Attr():
-                shape = self.tc_attr(node)
+            case ast.Field():
+                shape = self.tc_field(node)
             case ast.Behaviour():
                 shape = self.tc_behaviour(node)
             case ast.BinaryExpr():
@@ -896,7 +896,7 @@ class TypeCheck:
                 shape = Char
             case ast.FunDef():
                 shape = self.tc_fun_def(node)
-            case ast.FunParam():
+            case ast.Param():
                 shape = self.tc_fun_param(node)
             case ast.FunShape():
                 shape = self.tc_fun_shape(node)
@@ -916,8 +916,8 @@ class TypeCheck:
                 shape = self.tc_product_shape(node)
             case ast.ShapeLit():
                 shape = self.tc_shape_lit(node)
-            case ast.ShapeLitAttr():
-                shape = self.tc_shape_lit_attr(node)
+            case ast.ShapeLitField():
+                shape = self.tc_shape_lit_field(node)
             case ast.ShapeAlias():
                 shape = self.tc_shape_alias(node)
             case ast.ShapeRef():

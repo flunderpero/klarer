@@ -80,7 +80,7 @@ def shape(kind: Callable, **kwargs: Any) -> types.Shape:
         case types.PrimitiveShape:
             defaults.update({"name": None, "behaviours": types.Behaviours(())})
         case types.ProductShape:
-            defaults.update({"name": None, "attrs": (), "behaviours": types.Behaviours(())})
+            defaults.update({"name": None, "fields": (), "behaviours": types.Behaviours(())})
         case types.FunShape:
             defaults.update({"name": None, "builtin": False, "namespace": None})
     return kind(**defaults | kwargs)

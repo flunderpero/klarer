@@ -54,19 +54,17 @@ def typ(typ: ir.Typ) -> str:
             return "_"
         case ir.Fun():
             code = Code(0, [])
-            emit_fun_signature(
-                "", [ir.Param(ir.Reg(f"p{i}", x), x) for i, x in enumerate(typ.params)], typ.result, code
-            )
+            emit_fun_signature("", [ir.Reg(f"p{i}", x) for i, x in enumerate(typ.params)], typ.result, code)
             return str(code)
         case _:
             raise NotImplementedError(f"Unsupported type: {typ}")
 
 
-def emit_fun_signature(name: str, params: list[ir.Param], result: ir.Typ, code: Code) -> None:
+def emit_fun_signature(name: str, params: list[ir.Reg], result: ir.Typ, code: Code) -> None:
     code.write(f"func {name}(")
     for param in params:
         ref = "*" if isinstance(param.typ, ir.Struct) else ""
-        code.write(f"{param.reg} {ref}{typ(param.typ)}")
+        code.write(f"{param} {ref}{typ(param.typ)}")
         code.write(", ")
     code.write(") ")
     if not isinstance(result, ir.NoneTyp):

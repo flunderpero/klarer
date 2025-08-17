@@ -40,7 +40,7 @@ def test_assign() -> None:
 
 @pytest.mark.skip
 def test_assign_shape_literal_must_conform() -> None:
-    # Missing attribute.
+    # Missing field.
     _, errors = typecheck_err("""
         Person = {name Str, age Int}
         mut foo = Person{name = "Peter", age = 42}
@@ -55,7 +55,7 @@ def test_assign_shape_literal_must_conform() -> None:
     """)
     assert errors == ["`{field Str}` is not the same shape as `{field Int}`"]
 
-    # More attributes.
+    # More fields.
     _, errors = typecheck_err("""
         mut foo = {name = "Peter", age = 42}
         foo = {name = "Paul", age = 24, profession = "Nerd"}
@@ -93,17 +93,17 @@ def test_call_specialization() -> None:
         f("hello")
     """)
     assert tc.at(2, 1, ast.Name) == shape(
-        types.FunShape, name="f", params=(types.FunParam("a", types.Int),), result=types.Int
+        types.FunShape, name="f", params=(types.Param("a", types.Int),), result=types.Int
     )
     assert tc.at(2, 1, ast.Call) == types.Int
 
     assert tc.at(3, 1, ast.Name) == shape(
-        types.FunShape, name="f", params=(types.FunParam("a", types.Bool),), result=types.Bool
+        types.FunShape, name="f", params=(types.Param("a", types.Bool),), result=types.Bool
     )
     assert tc.at(3, 1, ast.Call) == types.Bool
 
     assert tc.at(4, 1, ast.Name) == shape(
-        types.FunShape, name="f", params=(types.FunParam("a", types.Str),), result=types.Str
+        types.FunShape, name="f", params=(types.Param("a", types.Str),), result=types.Str
     )
     assert tc.at(4, 1, ast.Call) == types.Str
 
@@ -114,7 +114,7 @@ def test_simple_product_shape() -> None:
     """)
     assert tc.at(1, 1, ast.ProductShape) == shape(
         types.ProductShape,
-        attrs=(types.Attr("name", types.Str), types.Attr("age", types.Int)),
+        fields=(types.Field("name", types.Str), types.Field("age", types.Int)),
     )
 
 
@@ -128,19 +128,19 @@ def test_shape_literal_basics() -> None:
     """)
     assert tc.at(1, 1, ast.ProductShape) == shape(
         types.ProductShape,
-        attrs=(types.Attr("name", types.Str), types.Attr("age", types.Int)),
+        fields=(types.Field("name", types.Str), types.Field("age", types.Int)),
     )
     assert str(tc.at(4, 1, ast.ShapeLit)) == str(
         shape(
             types.ProductShape,
             name="Person",
-            attrs=(types.Attr("name", types.Str), types.Attr("age", types.Int)),
+            fields=(types.Field("name", types.Str), types.Field("age", types.Int)),
         )
     )
 
 
 def test_shape_literal_must_conform_to_shape_alias() -> None:
-    # Missing attribute.
+    # Missing field.
     _, errors = typecheck_err("""
         Person = {name Str, age Int}
         foo = Person{age = 42}
@@ -164,7 +164,7 @@ def test_shape_literal_can_conform_to_shape_alias() -> None:
     assert tc.at(3, 1, ast.Name) == shape(
         types.ProductShape,
         name="Value",
-        attrs=(types.Attr("value", shape(types.ProductShape, attrs=(types.Attr("name", types.Str),))),),
+        fields=(types.Field("value", shape(types.ProductShape, fields=(types.Field("name", types.Str),))),),
     )
 
 
@@ -190,11 +190,11 @@ def test_behaviour() -> None:
         name="print_value",
         namespace="Value",
         params=(
-            types.FunParam(
+            types.Param(
                 "v",
                 shape(
                     types.ProductShape,
-                    attrs=(types.Attr("value", shape(types.PrimitiveShape, name="Str")),),
+                    fields=(types.Field("value", shape(types.PrimitiveShape, name="Str")),),
                 ),
             ),
         ),
@@ -206,11 +206,11 @@ def test_behaviour() -> None:
             name="print_value",
             namespace="Value",
             params=(
-                types.FunParam(
+                types.Param(
                     "v",
                     shape(
                         types.ProductShape,
-                        attrs=(types.Attr("value", types.Str),),
+                        fields=(types.Field("value", types.Str),),
                         behaviours=("@Value",),
                     ),
                 ),
@@ -234,8 +234,8 @@ def test_polymorphism() -> None:
     """)
     assert tc.at(8, 1, ast.Call) == shape(
         types.ProductShape,
-        attrs=(
-            types.Attr("a", types.Int),
-            types.Attr("b", types.Str),
+        fields=(
+            types.Field("a", types.Int),
+            types.Field("b", types.Str),
         ),
     )

@@ -181,7 +181,7 @@ class Parser:
         span = self.input.span()
         if not self.expect(token.Kind.fun):
             return None
-        params: list[ast.Attr] = []
+        params: list[ast.Param] = []
         if not self.expect(token.Kind.paren_left):
             return None
         while self.input.peek().kind != token.Kind.paren_right:
@@ -192,7 +192,7 @@ class Parser:
             param_shape_def = self.parse_shape()
             if not param_shape_def:
                 return None
-            params.append(ast.Attr(self.id(), param_name, param_shape_def, self.input.span_merge(param_span)))
+            params.append(ast.Param(self.id(), param_name, param_shape_def, self.input.span_merge(param_span)))
             match self.input.peek().kind:
                 case token.Kind.comma:
                     self.input.next()
@@ -215,7 +215,7 @@ class Parser:
             span = self.input.span()
             if not self.expect(token.Kind.curly_left):
                 return None
-            attrs: list[ast.Attr] = []
+            fields: list[ast.Field] = []
             while self.input.peek().kind != token.Kind.curly_right:
                 param_span = self.input.span()
                 param_name = self.expect_ident()
@@ -224,12 +224,12 @@ class Parser:
                 param_shape_def = self.parse_shape()
                 if not param_shape_def:
                     return None
-                attrs.append(ast.Attr(self.id(), param_name, param_shape_def, self.input.span_merge(param_span)))
+                fields.append(ast.Field(self.id(), param_name, param_shape_def, self.input.span_merge(param_span)))
                 if self.input.peek().kind == token.Kind.comma:
                     self.input.next()
             if not self.expect(token.Kind.curly_right):
                 return None
-            return ast.ProductShape(self.id(), attrs, [], [], self.input.span_merge(span))
+            return ast.ProductShape(self.id(), fields, [], [], self.input.span_merge(span))
 
         shape = parse_shape()
         assert isinstance(shape, ast.ProductShape)
@@ -269,7 +269,7 @@ class Parser:
     def parse_fun_def(self, name: str, span: Span, namespace: str | None = None) -> ast.FunDef | None:
         if not self.expect(token.Kind.fun):
             return None
-        params: list[ast.FunParam] = []
+        params: list[ast.Param] = []
         if not self.expect(token.Kind.paren_left):
             return None
         while self.input.peek().kind != token.Kind.paren_right:
@@ -279,7 +279,7 @@ class Parser:
             param_shape_def = self.parse_shape()
             if not param_shape_def:
                 return None
-            params.append(ast.FunParam(self.id(), param_name.value_str(), param_shape_def, param_name.span))
+            params.append(ast.Param(self.id(), param_name.value_str(), param_shape_def, param_name.span))
             match self.input.peek().kind:
                 case token.Kind.comma:
                     self.input.next()
@@ -437,7 +437,7 @@ class Parser:
                 shape_ref = ast.ShapeRef(self.id(), t.value_str(), self.input.span_merge(t.span))
             if not self.expect(token.Kind.curly_left):
                 return None
-            attrs: list[ast.ShapeLitAttr] = []
+            fields: list[ast.ShapeLitField] = []
             while self.input.peek().kind != token.Kind.curly_right:
                 param_span = self.input.span()
                 param_name = self.expect_ident()
@@ -448,12 +448,12 @@ class Parser:
                 param_value = self.parse_expr()
                 if not param_value:
                     return None
-                attrs.append(ast.ShapeLitAttr(self.id(), param_name, param_value, self.input.span_merge(param_span)))
+                fields.append(ast.ShapeLitField(self.id(), param_name, param_value, self.input.span_merge(param_span)))
                 if self.input.peek().kind == token.Kind.comma:
                     self.input.next()
             if not self.expect(token.Kind.curly_right):
                 return None
-            return ast.ShapeLit(self.id(), attrs, shape_ref, [], [], self.input.span_merge(span))
+            return ast.ShapeLit(self.id(), fields, shape_ref, [], [], self.input.span_merge(span))
 
         shape = parse_lit()
         assert isinstance(shape, ast.ShapeLit)

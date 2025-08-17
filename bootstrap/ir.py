@@ -359,15 +359,6 @@ class IR:
 
 
 @dataclass
-class Param:
-    reg: Reg
-    typ: Typ
-
-    def __str__(self) -> str:
-        return f"{self.typ} {self.reg.id}"
-
-
-@dataclass
 class Scope:
     parent: Scope | None
     names: dict[str, Reg]
@@ -395,7 +386,7 @@ class LoopScope:
 class FunIR:
     fn_def: ast.FunDef
     fn_name: str
-    params: list[Param]
+    params: list[Reg]
     result: Typ
     blocks: list[Block]
 
@@ -424,19 +415,19 @@ class FunGen:
         self.scope = Scope(None, {})
         fun_typ = spec.specialized
         fun_def = spec.fun_def
-        params: list[Param] = []
+        params: list[Reg] = []
         if spec.specialized.params:
             for param in spec.specialized.params:
                 typ = self.typ(param.shape)
                 reg = self.reg(typ)
                 self.scope.declare(param.name, reg)
-                params.append(Param(reg, typ))
+                params.append(reg)
         else:
             for p in fun_typ.params:
                 typ = self.typ(p.shape)
                 reg = self.reg(typ)
                 self.scope.declare(p.name, reg)
-                params.append(Param(reg, typ))
+                params.append(reg)
         result = self.typ(fun_typ.result)
         name = self.fun_name(fun_typ) if fun_def.name != "main" else "main"
         self.fun_ir = FunIR(fun_def, name, params, result, [])
@@ -481,7 +472,7 @@ class FunGen:
                 name = shape.mangled_name()
                 if existing := self.ir.structs.get(name):
                     return existing
-                struct = Struct(name, [self.typ(x.shape) for x in shape.attrs_sorted])
+                struct = Struct(name, [self.typ(x.shape) for x in shape.fields_sorted])
                 self.ir.structs[name] = struct
                 return struct
             case types.FunShape():
@@ -587,13 +578,13 @@ class FunGen:
                 self.emit(IntConst(reg, value=int(node.value)), node)
             case ast.ShapeLit():
                 ast.walk(node, self.generate)
-                # We need to sort the attributes by name because we did so in `typ()` when
+                # We need to sort the fields by name because we did so in `typ()` when
                 # construction the struct type.
-                regs = [self.node_regs[x.id] for x in sorted(node.attrs, key=lambda x: x.name)]
+                regs = [self.node_regs[x.id] for x in sorted(node.fields, key=lambda x: x.name)]
                 typ = self.typ(self.type_env.get(node))
                 reg = self.reg(typ)
                 self.emit(Alloc(reg, regs), node)
-            case ast.ShapeLitAttr():
+            case ast.ShapeLitField():
                 ast.walk(node, self.generate)
                 reg = self.node_regs[node.value.id]
                 self.node_regs[node.id] = reg
@@ -621,18 +612,18 @@ class FunGen:
                 types_src = self.type_env.get(node.target)
                 assert isinstance(src.typ, Struct), f"Expected Struct, got {src.typ}"
                 assert isinstance(types_src, types.ProductShape), f"Expected Shape, got {types_src}"
-                attr = types_src.attr(node.name)
-                if attr is not None:
-                    attr_index = types_src.attrs_sorted.index(attr)
-                    assert attr_index is not None, f"No member {node.name} in type {types_src}"
-                    getptr_reg = self.reg(Ptr(src.typ.fields[attr_index]))
+                field = types_src.field(node.name)
+                if field is not None:
+                    field_index = types_src.fields_sorted.index(field)
+                    assert field_index is not None, f"No member {node.name} in type {types_src}"
+                    getptr_reg = self.reg(Ptr(src.typ.fields[field_index]))
                     if isinstance(parent, ast.Assign):
-                        self.emit(GetPtr(getptr_reg, src, attr_index), node)
+                        self.emit(GetPtr(getptr_reg, src, field_index), node)
                     else:
-                        self.emit(GetPtr(getptr_reg, src, attr_index), None)
-                        reg = self.reg(src.typ.fields[attr_index])
+                        self.emit(GetPtr(getptr_reg, src, field_index), None)
+                        reg = self.reg(src.typ.fields[field_index])
                         self.emit(Load(reg, getptr_reg), node)
-                # If it's not an attribute, it has to be a behaviour function.
+                # If it's not an field, it has to be a behaviour function.
                 # todo: emit a GetFunPtr if `parent` isn't ast.Call.
             case ast.Call():
                 callee = self.type_env.get(node.callee)
@@ -689,7 +680,7 @@ class FunGen:
                                 raise AssertionError(f"Unsupported type for equality comparison: {lhs_reg.typ}")
                     case _:
                         raise AssertionError(f"Unsupported binary op: {node.op}")
-            case ast.ShapeRef() | ast.FunParam() | ast.UnitShape() | ast.Behaviour() | ast.ProductShape():
+            case ast.ShapeRef() | ast.Param() | ast.UnitShape() | ast.Behaviour() | ast.ProductShape():
                 pass
             case _:
                 raise AssertionError(f"Unsupported node: {node.__class__}")

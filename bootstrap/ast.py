@@ -97,7 +97,7 @@ class Member:
 
 
 @dataclass
-class ShapeLitAttr:
+class ShapeLitField:
     id: NodeId = field(compare=False, hash=False, repr=False)
     name: str
     value: Expr
@@ -110,7 +110,7 @@ class ShapeLitAttr:
 @dataclass
 class ShapeLit:
     id: NodeId = field(compare=False, hash=False, repr=False)
-    attrs: list[ShapeLitAttr]
+    fields: list[ShapeLitField]
     shape_ref: ShapeRef | None
     composites: list[ShapeLit]
     behaviours: list[Behaviour]
@@ -120,7 +120,7 @@ class ShapeLit:
         shape_ref = f"{self.shape_ref}" if self.shape_ref else ""
         composites = " + " + " + ".join(str(x) for x in self.composites) if self.composites else ""
         behaviours = " + " + " + ".join(str(x) for x in self.behaviours) if self.behaviours else ""
-        return nid(self.id) + f"{shape_ref}{{{', '.join(str(x) for x in self.attrs)}}}{composites}{behaviours}"
+        return nid(self.id) + f"{shape_ref}{{{', '.join(str(x) for x in self.fields)}}}{composites}{behaviours}"
 
 
 @dataclass
@@ -166,7 +166,7 @@ class UnitShape:
 @dataclass
 class FunShape:
     id: NodeId = field(compare=False, hash=False, repr=False)
-    params: list[Attr]
+    params: list[Param]
     result: Shape
     span: Span = field(compare=False, hash=False, repr=False)
 
@@ -178,16 +178,16 @@ class FunShape:
 @dataclass
 class ProductShape:
     id: NodeId = field(compare=False, hash=False, repr=False)
-    attrs: list[Attr]
+    fields: list[Field]
     behaviours: list[Behaviour]
     composites: list[Shape]
     span: Span = field(compare=False, hash=False, repr=False)
 
     def __str__(self) -> str:
-        attrs = ", ".join(str(x) for x in self.attrs)
+        fields = ", ".join(str(x) for x in self.fields)
         composites = " + " + " + ".join(str(x) for x in self.composites) if self.composites else ""
         behaviours = " + " + " + ".join(str(x) for x in self.behaviours) if self.behaviours else ""
-        return nid(self.id) + f"{{{attrs}}}{composites}{behaviours}"
+        return nid(self.id) + f"{{{fields}}}{composites}{behaviours}"
 
 
 @dataclass
@@ -289,7 +289,7 @@ class Block:
 
 
 @dataclass
-class Attr:
+class Field:
     id: NodeId = field(compare=False, hash=False, repr=False)
     name: str
     shape: Shape
@@ -300,7 +300,7 @@ class Attr:
 
 
 @dataclass
-class FunParam:
+class Param:
     id: NodeId = field(compare=False, hash=False, repr=False)
     name: str
     shape: Shape
@@ -315,7 +315,7 @@ class FunDef:
     id: NodeId = field(compare=False, hash=False, repr=False)
     name: str
     namespace: str | None
-    params: list[FunParam]
+    params: list[Param]
     result: Shape
     body: Block
     span: Span = field(compare=False, hash=False, repr=False)
@@ -338,7 +338,7 @@ class Module:
 
 Shape = ShapeRef | FunShape | ProductShape | SumShape | UnitShape
 Expr = BinaryExpr | Block | BoolLit | Call | CharLit | If | IntLit | Member | Name | StrLit | ShapeLit
-Node = Expr | Module | Shape | Attr | ShapeAlias | ShapeLitAttr | IfArm | FunParam | Assign | FunDef | Behaviour | Shape
+Node = Expr | Module | Shape | Field | ShapeAlias | ShapeLitField | IfArm | Param | Assign | FunDef | Behaviour | Shape
 
 ASTVisitor = Callable[[Node, Node | None], Node]
 
@@ -363,7 +363,7 @@ def walk(node: Node, visit_: ASTVisitor) -> bool:
                 node.nodes[i] = visit(n, node)
         case FunDef():
             for i, param in enumerate(node.params):
-                node.params[i] = cast(FunParam, visit(param, node))
+                node.params[i] = cast(Param, visit(param, node))
             node.result = cast(Shape, visit(node.result, node))
             node.body = cast(Block, visit(node.body, node))
         case Call():
@@ -391,21 +391,21 @@ def walk(node: Node, visit_: ASTVisitor) -> bool:
         case ShapeAlias():
             node.shape = cast(Shape, visit(node.shape, node))
         case ShapeLit():
-            for i, attr in enumerate(node.attrs):
-                node.attrs[i] = cast(ShapeLitAttr, visit(attr, node))
+            for i, field in enumerate(node.fields):
+                node.fields[i] = cast(ShapeLitField, visit(field, node))
             if node.shape_ref:
                 node.shape_ref = cast(ShapeRef, visit(node.shape_ref, node))
             for i, behaviour in enumerate(node.behaviours):
                 node.behaviours[i] = cast(Behaviour, visit(behaviour, node))
             for i, composite in enumerate(node.composites):
                 node.composites[i] = cast(ShapeLit, visit(composite, node))
-        case ShapeLitAttr():
+        case ShapeLitField():
             node.value = cast(Expr, visit(node.value, node))
-        case Attr():
+        case Field():
             node.shape = cast(Shape, visit(node.shape, node))
         case ProductShape():
-            for i, attr in enumerate(node.attrs):
-                node.attrs[i] = cast(Attr, visit(attr, node))
+            for i, field in enumerate(node.fields):
+                node.fields[i] = cast(Field, visit(field, node))
             for i, composite in enumerate(node.composites):
                 node.composites[i] = cast(Shape, visit(composite, node))
             for i, behaviour in enumerate(node.behaviours):
@@ -417,9 +417,9 @@ def walk(node: Node, visit_: ASTVisitor) -> bool:
                 node.behaviours[i] = cast(Behaviour, visit(behaviour, node))
         case FunShape():
             for i, param in enumerate(node.params):
-                node.params[i] = cast(Attr, visit(param, node))
+                node.params[i] = cast(Param, visit(param, node))
             node.result = cast(Shape, visit(node.result, node))
-        case FunParam():
+        case Param():
             node.shape = cast(Shape, visit(node.shape, node))
         case Name() | IntLit() | CharLit() | StrLit() | BoolLit() | ShapeRef() | Behaviour() | UnitShape():
             return False

@@ -257,13 +257,11 @@ class SumShape:
         """A sum shape conforms the other shape if it has at least all the
         variants of the other shape and the behaviours conform.
 
-        The empty shape `{}` conforms any other shape.
-
-        Examples:
-        - {name Str, age Int} conforms to {name Str}
-        - {} conforms any shape, function, or primitive
-
+        A sum shape also conforms to the empty shape `{}`.
         """
+        if isinstance(other, ProductShape) and other.is_empty():
+            return True
+
         if not isinstance(other, SumShape):
             return False
 
@@ -275,9 +273,27 @@ class SumShape:
 
 
 @dataclass(eq=True, frozen=True)
+class FunParam:
+    name: str
+    shape: Shape
+
+    def __str__(self) -> str:
+        return self.name + " " + str(self.shape)
+
+    def is_same(self, other: FunParam) -> bool:
+        return self.shape.is_same(other.shape)
+
+    def mangled_name(self) -> str:
+        return self.name + "_" + self.shape.mangled_name()
+
+    def conforms_to(self, other: FunParam) -> bool:
+        return self.shape.conforms_to(other.shape)
+
+
+@dataclass(eq=True, frozen=True)
 class FunShape:
     name: str | None
-    params: tuple[Attr, ...]
+    params: tuple[FunParam, ...]
     result: Shape
     namespace: str | None
     span: Span = field(compare=False, hash=False, repr=False)
@@ -411,19 +427,19 @@ class Scope:
         fun_defaults = {"namespace": None, "span": span, "builtin": True}
         scope = Scope(None, None, {})
         scope.bindings["print"] = Binding(
-            FunShape("print", (Attr("s", Str),), Unit, **fun_defaults),
+            FunShape("print", (FunParam("s", Str),), Unit, **fun_defaults),
             **binding_defaults,
         )
         scope.bindings["int_to_str"] = Binding(
-            FunShape("int_to_str", (Attr("i", Int),), Str, **fun_defaults),
+            FunShape("int_to_str", (FunParam("i", Int),), Str, **fun_defaults),
             **binding_defaults,
         )
         scope.bindings["char_to_str"] = Binding(
-            FunShape("char_to_str", (Attr("c", Char),), Str, **fun_defaults),
+            FunShape("char_to_str", (FunParam("c", Char),), Str, **fun_defaults),
             **binding_defaults,
         )
         scope.bindings["bool_to_str"] = Binding(
-            FunShape("bool_to_str", (Attr("b", Bool),), Str, **fun_defaults),
+            FunShape("bool_to_str", (FunParam("b", Bool),), Str, **fun_defaults),
             **binding_defaults,
         )
         scope.bindings["Int"] = Binding(Int, **binding_defaults)
@@ -527,10 +543,10 @@ class TypeCheck:
 
             base = self.type_env.get(fun_def)
             assert isinstance(base, FunShape)
-            params: list[Attr] = []
+            params: list[FunParam] = []
             for param, arg in zip(fun.params, call_args):
                 shape = self.type_env.get(arg)
-                params.append(Attr(param.name, shape))
+                params.append(FunParam(param.name, shape))
             specialized = FunShape(fun.name, tuple(params), base.result, fun.namespace, fun.span, builtin=fun.builtin)
 
             spec = FunSpec(self.type_env, fun_def, base, specialized)
@@ -640,26 +656,34 @@ class TypeCheck:
             assert isinstance(node.callee, ast.Member), f"Expected Member, got {node.callee}"
             args = [node.callee.target, *args]
 
-        spec = self.specialize(callee, args, node.span)
-        if isinstance(spec, ErrorShape):
-            return ErrorShape(error.cascaded_error(spec.error, node.span))
-        self.type_env.set(node.callee, spec.specialized)
+        if callee.is_named:
+            spec = self.specialize(callee, args, node.span)
+            if isinstance(spec, ErrorShape):
+                return ErrorShape(error.cascaded_error(spec.error, node.span))
+            self.type_env.set(node.callee, spec.specialized)
+            callee = spec.specialized
 
-        # Now check the types.
-        callee = spec.specialized
         return callee.result
 
     def tc_fun_def(self, node: ast.FunDef) -> Shape:
-        params: list[Attr] = []
+        params: list[FunParam] = []
         with self.child_scope(node):
             for param in node.params:
                 self.visit(param, node)
                 param_shape = self.type_env.get(param)
                 if err := self.scope.bind(param.name, param_shape, is_fun_param=True):
                     return self.error(err)
-                params.append(Attr(param.name, param_shape))
+                params.append(FunParam(param.name, param_shape))
             self.visit(node.body, node)
-        return_shape = self.type_env.get(node.body)
+        self.visit(node.result, node)
+        return_shape = self.type_env.get(node.result)
+        if isinstance(return_shape, ErrorShape):
+            return return_shape
+        body_shape = self.type_env.get(node.body)
+        if isinstance(body_shape, ErrorShape):
+            return body_shape
+        if not body_shape.conforms_to(return_shape):
+            return self.error(error.does_not_conform_to(str(body_shape), str(return_shape), node.span))
         shape = FunShape(node.name, (*params,), return_shape, node.namespace, node.span, builtin=False)
         log("typechecker-trace", f"Adding {shape} to fun_defs", self.nesting_level)
         self.fun_defs[shape] = node
@@ -697,6 +721,19 @@ class TypeCheck:
         if isinstance(shape, ErrorShape):
             return shape
         return shape
+
+    def tc_fun_shape(self, node: ast.FunShape) -> Shape:
+        ast.walk(node, self.visit)
+        params: list[FunParam] = []
+        for param in node.params:
+            shape = self.type_env.get(param.shape)
+            if isinstance(shape, ErrorShape):
+                return shape
+            params.append(FunParam(param.name, shape))
+        result = self.type_env.get(node.result)
+        if isinstance(result, ErrorShape):
+            return result
+        return FunShape(None, (*params,), result, None, node.span, builtin=False)
 
     def tc_if(self, node: ast.If) -> Shape:
         ast.walk(node, self.visit)
@@ -861,6 +898,8 @@ class TypeCheck:
                 shape = self.tc_fun_def(node)
             case ast.FunParam():
                 shape = self.tc_fun_param(node)
+            case ast.FunShape():
+                shape = self.tc_fun_shape(node)
             case ast.If():
                 shape = self.tc_if(node)
             case ast.IfArm():

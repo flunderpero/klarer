@@ -52,8 +52,25 @@ def typ(typ: ir.Typ) -> str:
             return typ.fqn
         case ir.NoneTyp():
             return "_"
+        case ir.Fun():
+            code = Code(0, [])
+            emit_fun_signature(
+                "", [ir.Param(ir.Reg(f"p{i}", x), x) for i, x in enumerate(typ.params)], typ.result, code
+            )
+            return str(code)
         case _:
             raise NotImplementedError(f"Unsupported type: {typ}")
+
+
+def emit_fun_signature(name: str, params: list[ir.Param], result: ir.Typ, code: Code) -> None:
+    code.write(f"func {name}(")
+    for param in params:
+        ref = "*" if isinstance(param.typ, ir.Struct) else ""
+        code.write(f"{param.reg} {ref}{typ(param.typ)}")
+        code.write(", ")
+    code.write(") ")
+    if not isinstance(result, ir.NoneTyp):
+        code.write(f"{typ(result)} ")
 
 
 class FuncGen:
@@ -112,6 +129,8 @@ class FuncGen:
                     #       pointers to struct fields in Go.
                     code.write(f"; _ = {inst_reg}")
                 code.newline()
+            case ir.GetFunPtr():
+                code.writeln(f"{inst_reg} {assign} {inst.src.fqn}")
             case ir.IntConst():
                 code.writeln(f"{inst_reg} {assign} {inst.value}")
             case ir.Load():
@@ -170,14 +189,7 @@ class FuncGen:
 
     def generate(self) -> str:
         code = Code(0, [])
-        code.write(f"func {self.fun_ir.fn_name}(")
-        for param in self.fun_ir.params:
-            ref = "*" if isinstance(param.typ, ir.Struct) else ""
-            code.write(f"{param.reg} {ref}{typ(param.typ)}")
-            code.write(", ")
-        code.write(") ")
-        if not isinstance(self.fun_ir.result, ir.NoneTyp):
-            code.write(f"{typ(self.fun_ir.result)} ")
+        emit_fun_signature(self.fun_ir.fn_name, self.fun_ir.params, self.fun_ir.result, code)
         code.writeln("{")
         code.indent()
         self.handle_phi_nodes(code)

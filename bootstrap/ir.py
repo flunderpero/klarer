@@ -123,7 +123,7 @@ class GetPtr:
 
 
 @dataclass
-class GetFnPtr:
+class GetFunPtr:
     reg: Reg
     src: Fun
 
@@ -266,7 +266,7 @@ class Phi:
         return [x.reg for x in self.incoming] + [self.reg]
 
 
-Inst = IntConst | GetPtr | GetFnPtr | Load | Store | Call | Alloc | IAddO | ISubO | ICmp | Phi
+Inst = IntConst | GetPtr | GetFunPtr | Load | Store | Call | Alloc | IAddO | ISubO | ICmp | Phi
 
 BlockId = int
 
@@ -603,17 +603,17 @@ class FunGen:
                     self.node_regs[node.id] = reg
                     return node
                 # If this node is the callee of a call node then we don't want
-                # to emit a GetFnPtr for named functions.
+                # to emit a GetFunPtr for named functions.
                 if isinstance(parent, ast.Call) and parent.callee == node:
                     return node
                 ir_typ = self.type_env.get(node)
                 if not isinstance(ir_typ, types.FunShape) or not ir_typ.is_named:
                     return node
-                # Emit a GetFnPtr if the identifier refers to a named function.
+                # Emit a GetFunPtr if the identifier refers to a named function.
                 getptr_reg = self.reg(Ptr(self.typ(ir_typ)))
-                fn_typ = self.typ(ir_typ)
-                assert isinstance(fn_typ, Fun), f"Expected Fn, got {fn_typ}"
-                self.emit(GetFnPtr(getptr_reg, fn_typ), None)
+                fun_typ = self.typ(ir_typ)
+                assert isinstance(fun_typ, Fun), f"Expected Fun, got {fun_typ}"
+                self.emit(GetFunPtr(getptr_reg, fun_typ), None)
                 self.node_regs[node.id] = getptr_reg
             case ast.Member():
                 ast.walk(node, self.generate)
@@ -650,7 +650,7 @@ class FunGen:
                     reg = self.reg(self.typ(fun.result))
                     self.emit(Call(reg, self.fun_name(fun), args), node)
                 else:
-                    # Indirect call by register (either a `Fn` or a `Ptr<Fn>`).
+                    # Indirect call by register (either a `Fun` or a `Ptr<Fun>`).
                     src = self.node_regs[node.callee.id]
                     # Determine the result type of the call.
                     if isinstance(src.typ, Ptr):
@@ -689,7 +689,7 @@ class FunGen:
                                 raise AssertionError(f"Unsupported type for equality comparison: {lhs_reg.typ}")
                     case _:
                         raise AssertionError(f"Unsupported binary op: {node.op}")
-            case ast.ShapeRef() | ast.FunParam() | ast.UnitShape() | ast.Behaviour():
+            case ast.ShapeRef() | ast.FunParam() | ast.UnitShape() | ast.Behaviour() | ast.ProductShape():
                 pass
             case _:
                 raise AssertionError(f"Unsupported node: {node.__class__}")

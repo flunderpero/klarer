@@ -33,7 +33,7 @@ def test_shape_literal_can_conform_to_shape_alias() -> None:
 def test_call() -> None:
     stdout = compile_and_run_success("""
 
-        what_to_print = fun():
+        what_to_print = fun() Str:
             "PASS"
         end
 

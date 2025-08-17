@@ -71,7 +71,7 @@ def test_assign_shape_literal_must_conform() -> None:
 
 
 def test_fun_basics() -> None:
-    tc = typecheck(""" f = fun(): 42 end """)
+    tc = typecheck(""" f = fun() Int: 42 end """)
     assert tc.at(1, 1, ast.FunDef) == shape(types.FunShape, name="f", params=(), result=types.Int)
     tc = typecheck(""" main = fun(): end """)
     assert tc.at(1, 1, ast.FunDef) == shape(types.FunShape, name="main", params=(), result=types.Unit)
@@ -79,7 +79,7 @@ def test_fun_basics() -> None:
 
 def test_call_without_params() -> None:
     tc = typecheck("""
-        f = fun(): 42 end
+        f = fun() Int: 42 end
         f()
     """)
     assert tc.at(2, 1, ast.Call) == types.Int
@@ -87,23 +87,23 @@ def test_call_without_params() -> None:
 
 def test_call_specialization() -> None:
     tc = typecheck("""
-        f = fun(a Int | Bool | Str): a end
+        f = fun(a Int | Bool | Str) {}: a end
         f(42)
         f(true)
         f("hello")
     """)
     assert tc.at(2, 1, ast.Name) == shape(
-        types.FunShape, name="f", params=(types.Attr("a", types.Int),), result=types.Int
+        types.FunShape, name="f", params=(types.FunParam("a", types.Int),), result=types.Int
     )
     assert tc.at(2, 1, ast.Call) == types.Int
 
     assert tc.at(3, 1, ast.Name) == shape(
-        types.FunShape, name="f", params=(types.Attr("a", types.Bool),), result=types.Bool
+        types.FunShape, name="f", params=(types.FunParam("a", types.Bool),), result=types.Bool
     )
     assert tc.at(3, 1, ast.Call) == types.Bool
 
     assert tc.at(4, 1, ast.Name) == shape(
-        types.FunShape, name="f", params=(types.Attr("a", types.Str),), result=types.Str
+        types.FunShape, name="f", params=(types.FunParam("a", types.Str),), result=types.Str
     )
     assert tc.at(4, 1, ast.Call) == types.Str
 
@@ -190,7 +190,7 @@ def test_behaviour() -> None:
         name="print_value",
         namespace="Value",
         params=(
-            types.Attr(
+            types.FunParam(
                 "v",
                 shape(
                     types.ProductShape,
@@ -206,7 +206,7 @@ def test_behaviour() -> None:
             name="print_value",
             namespace="Value",
             params=(
-                types.Attr(
+                types.FunParam(
                     "v",
                     shape(
                         types.ProductShape,
@@ -217,4 +217,25 @@ def test_behaviour() -> None:
             ),
             result=types.Unit,
         )
+    )
+
+
+def test_polymorphism() -> None:
+    tc = typecheck("""
+        double_map = fun(in {x {}, y {}}, f fun(in {}) {}) {}:
+            {a = f(in.x), b = f(in.y)}
+        end
+
+        id = fun(v {}) {}: v end
+
+        main = fun():
+            result = double_map({x = 42, y = "Hello"}, id)
+        end
+    """)
+    assert tc.at(8, 1, ast.Call) == shape(
+        types.ProductShape,
+        attrs=(
+            types.Attr("a", types.Int),
+            types.Attr("b", types.Str),
+        ),
     )

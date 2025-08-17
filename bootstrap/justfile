@@ -4,17 +4,19 @@ precommit:
     just test
 
 format:
-    @echo "Formatting ..."
+    @echo "Formatting..."
     ruff format
     npx prettier -w *.md ../*.md
 
 lint *args:
-    @echo "Linting ..."
+    @echo "Linting..."
     pyright
     ruff check {{args}}
-    @echo "Checking for test exclusions in TEST.md ..."
-    @grep '!only' TEST.md && exit 1 || true
-    @grep '!skip' TEST.md && exit 1 || true
+    @echo "Checking for test exclusions in Markdown files..."
+    for f in TEST.md ../book.md; do \
+        grep -H '!only' "$f" && exit 1 || true; \
+        grep -H '!skip' "$f" && exit 1 || true; \
+    done
 
 test: test-pytest test-book test-md
 

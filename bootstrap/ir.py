@@ -374,6 +374,12 @@ class Scope:
             return self.parent.find(name)
         return None
 
+    def all_regs(self) -> list[Reg]:
+        res = list(self.names.values())
+        if self.parent:
+            res.extend(self.parent.all_regs())
+        return res
+
 
 @dataclass
 class LoopScope:
@@ -547,7 +553,7 @@ class FunGen:
                 for then_block in then_blocks:
                     then_block.terminator = Jump(next_block)
 
-                # Insert another phi node for the result of the whole if expression.
+                # Insert a phi node for the result of the whole if expression.
                 types_typ = self.type_env.get(node)
                 if not isinstance(types_typ, types.UnitShape):
                     reg = self.reg(self.typ(types_typ))

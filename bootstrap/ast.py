@@ -126,6 +126,7 @@ class ShapeLit:
 @dataclass
 class Behaviour:
     id: NodeId = field(compare=False, hash=False, repr=False)
+    # todo: This should include the "@"
     name: str
     span: Span = field(compare=False, hash=False, repr=False)
 

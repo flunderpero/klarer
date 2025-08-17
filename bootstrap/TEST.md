@@ -207,6 +207,28 @@ John
 PASS
 ```
 
+**Assignments are local to the scope they are created in.**
+
+```klarer
+main = fun():
+    a = "PASS1"
+    print(a)
+
+    if case true:
+        a = "PASS2"
+        print(a)
+    end
+
+    print(a)
+end
+```
+
+```
+PASS1
+PASS2
+PASS1
+```
+
 ## Behaviour
 
 ```klarer

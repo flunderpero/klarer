@@ -42,22 +42,26 @@ class Code:
         self.newline()
 
 
-def typ(typ: ir.Typ) -> str:
-    match typ:
+def typ(ir_typ: ir.Typ) -> str:
+    match ir_typ:
         case ir.Int():
             return "int"
+        case ir.Ptr():
+            if isinstance(ir_typ.typ, ir.Struct):
+                return f"*{typ(ir_typ.typ)}"
+            return typ(ir_typ.typ)
         case ir.Str():
             return "string"
         case ir.Struct():
-            return typ.fqn
+            return ir_typ.fqn
         case ir.NoneTyp():
             return "_"
         case ir.Fun():
             code = Code(0, [])
-            emit_fun_signature("", [ir.Reg(f"p{i}", x) for i, x in enumerate(typ.params)], typ.result, code)
+            emit_fun_signature("", [ir.Reg(f"p{i}", x) for i, x in enumerate(ir_typ.params)], ir_typ.result, code)
             return str(code)
         case _:
-            raise NotImplementedError(f"Unsupported type: {typ}")
+            raise NotImplementedError(f"Unsupported type: {ir_typ}")
 
 
 def emit_fun_signature(name: str, params: list[ir.Reg], result: ir.Typ, code: Code) -> None:
@@ -90,15 +94,11 @@ class FuncGen:
 
     def inst(self, inst: ir.Inst, code: Code) -> None:
         inst_reg = self.reg(inst.reg)
-        is_phi_reg = inst.reg.id != inst_reg.id
-        assign = ":="
-        if is_phi_reg:
-            assign = "="
         match inst:
             case ir.Alloc():
                 assert isinstance(inst_reg.typ, ir.Struct)
                 struct_name = inst_reg.typ.fqn
-                code.write(f"{inst_reg} {assign} &{struct_name}{{")
+                code.write(f"{inst_reg} = &{struct_name}{{")
                 for i, arg_reg in enumerate(inst.args):
                     if i > 0:
                         code.write(", ")
@@ -110,30 +110,24 @@ class FuncGen:
                 if isinstance(callee, str) and callee in map_builtins:
                     callee = map_builtins[callee]
                 if inst_reg != ir.NoneReg:
-                    code.write(f"{inst_reg} {assign} ")
+                    code.write(f"{inst_reg} = ")
                 code.write(f"{callee}(")
                 code.writeln(", ".join(f"{self.reg(arg)}" for arg in inst.args) + ")")
             case ir.GetPtr():
                 self.getptrs[inst_reg] = inst
                 src_reg = self.reg(inst.src)
                 if isinstance(inst.src.typ, ir.Struct):
-                    code.write(f"{inst_reg} {assign} {src_reg}._{inst.field}")
+                    code.write(f"{inst_reg} = {src_reg}._{inst.field}")
                 else:
-                    code.write(f"{inst_reg} {assign} {src_reg}")
-                if not is_phi_reg:
-                    # todo: This is a hack because we shouldn't emit the code above
-                    #       if the result is used in a `Store` only.
-                    #       `Store` accesses `self.getptrs` because we cannot have
-                    #       pointers to struct fields in Go.
-                    code.write(f"; _ = {inst_reg}")
+                    code.write(f"{inst_reg} = {src_reg}")
                 code.newline()
             case ir.GetFunPtr():
-                code.writeln(f"{inst_reg} {assign} {inst.src.fqn}")
+                code.writeln(f"{inst_reg} = {inst.src.fqn}")
             case ir.IntConst():
-                code.writeln(f"{inst_reg} {assign} {inst.value}")
+                code.writeln(f"{inst_reg} = {inst.value}")
             case ir.Load():
                 src_reg = self.reg(inst.src)
-                code.writeln(f"{inst_reg} {assign} {src_reg}")
+                code.writeln(f"{inst_reg} = {src_reg}")
             case ir.Store():
                 # inst.target has to be a GetPtr we have already seen.
                 target_reg = self.reg(inst.target)
@@ -177,20 +171,30 @@ class FuncGen:
         if len(self.fun_ir.blocks) > 1:
             code.dedent()
 
-    def handle_phi_nodes(self, code: Code) -> None:
+    def connect_phi_registers(self) -> None:
         for block in self.fun_ir.blocks:
             for inst in block.insts:
                 if isinstance(inst, ir.Phi):
-                    code.writeln(f"var {inst.reg} {typ(inst.reg.typ)}")
                     for phi_in in inst.incoming:
                         self.reg_map[phi_in.reg] = inst.reg
+
+    def declare_regs(self, code: Code) -> None:
+        for block in self.fun_ir.blocks:
+            for inst in block.insts:
+                if isinstance(inst.reg.typ, ir.NoneTyp):
+                    continue
+                if inst.reg in self.reg_map:
+                    continue
+                ref = "*" if isinstance(inst.reg.typ, ir.Struct) else ""
+                code.writeln(f"var {inst.reg} {ref}{typ(inst.reg.typ)}")
 
     def generate(self) -> str:
         code = Code(0, [])
         emit_fun_signature(self.fun_ir.fn_name, self.fun_ir.params, self.fun_ir.result, code)
         code.writeln("{")
         code.indent()
-        self.handle_phi_nodes(code)
+        self.connect_phi_registers()
+        self.declare_regs(code)
         if len(self.fun_ir.blocks) > 1:
             code.writeln(f"block := {self.fun_ir.blocks[0].id}")
             code.writeln("for {")

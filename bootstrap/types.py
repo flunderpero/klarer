@@ -410,7 +410,6 @@ class TypeEnv:
 class Binding:
     shape: Shape
     builtin: bool
-    is_fun_param: bool
 
 
 @dataclass
@@ -423,7 +422,7 @@ class Scope:
     def root() -> Scope:
         """The root scope with all the builtins."""
         span = Span("<builtin>", "", 0, 0)
-        binding_defaults = {"builtin": True, "is_fun_param": False}
+        binding_defaults = {"builtin": True}
         fun_defaults = {"namespace": None, "span": span, "builtin": True}
         scope = Scope(None, None, {})
         scope.bindings["print"] = Binding(
@@ -455,20 +454,9 @@ class Scope:
             return self.parent.lookup(name)
         return None
 
-    def bind(
-        self, name: str, shape: Shape, *, is_fun_param: bool = False, can_shadow_parent_scopes: bool = False
-    ) -> error.Error | None:
-        """Bind the name to the typ.
-        An error is returned if the name is already bound to a different type.
-
-        If `can_shadow_parent_scopes` is True, the name can be bound even if
-        it is already bound in a parent scope but not in the current scope.
-        """
-        existing = self.lookup(name)
-        if existing and (not can_shadow_parent_scopes or name in self.bindings):
-            return error.duplicate_declaration(name, shape.span, existing.shape.span)
-        self.bindings[name] = Binding(shape, builtin=False, is_fun_param=is_fun_param)
-        return None
+    def bind(self, name: str, shape: Shape) -> None:
+        """Bind the name to the typ overwriting any existing binding."""
+        self.bindings[name] = Binding(shape, builtin=False)
 
     def inside(self, node_typ: type[ast.Node]) -> ast.Node | None:
         s = self
@@ -533,6 +521,13 @@ class TypeCheck:
                 return spec
         return None
 
+    def build_specialized(self, base: FunShape, call_args: list[ast.Expr]) -> FunShape:
+        params: list[Param] = []
+        for param, arg in zip(base.params, call_args):
+            shape = self.type_env.get(arg)
+            params.append(Param(param.name, shape))
+        return FunShape(base.name, tuple(params), base.result, base.namespace, base.span, builtin=base.builtin)
+
     def specialize(self, fun: FunShape, call_args: list[ast.Expr], span: Span) -> FunSpec | ErrorShape:
         spec = self.fun_spec(fun, call_args)
         if spec:
@@ -543,11 +538,7 @@ class TypeCheck:
 
             base = self.type_env.get(fun_def)
             assert isinstance(base, FunShape)
-            params: list[Param] = []
-            for param, arg in zip(fun.params, call_args):
-                shape = self.type_env.get(arg)
-                params.append(Param(param.name, shape))
-            specialized = FunShape(fun.name, tuple(params), base.result, fun.namespace, fun.span, builtin=fun.builtin)
+            specialized = self.build_specialized(base, call_args)
 
             spec = FunSpec(self.type_env, fun_def, base, specialized)
 
@@ -600,13 +591,13 @@ class TypeCheck:
         value = self.type_env.get(node.value)
         if isinstance(value, ErrorShape):
             return value
-        binding = self.scope.lookup(node.target.name)
-        if binding is not None:
-            if not binding.shape.is_same(value):
-                return self.error(error.is_not_same(str(value), str(binding.shape), node.target.span))
-        else:
-            log("typechecker-trace", f"Binding {node.target.name} to {value}", self.nesting_level)
-            self.scope.bind(node.target.name, value)
+        # binding = self.scope.lookup(node.target.name)
+        # if binding is not None:
+        #     if not binding.shape.is_same(value):
+        #         return self.error(error.is_not_same(str(value), str(binding.shape), node.target.span))
+        # else:
+        log("typechecker-trace", f"Binding {node.target.name} to {value}", self.nesting_level)
+        self.scope.bind(node.target.name, value)
         self.type_env.set(node.target, value)
         return Unit
 
@@ -649,6 +640,9 @@ class TypeCheck:
 
         # Build a specialized function if it is not a builtin.
         if callee.builtin:
+            specialized = self.build_specialized(callee, node.args)
+            if not specialized.conforms_to(callee):
+                return self.error(error.does_not_conform_to(str(specialized), str(callee), node.span))
             return callee.result
 
         args = node.args
@@ -671,7 +665,7 @@ class TypeCheck:
             for param in node.params:
                 self.visit(param, node)
                 param_shape = self.type_env.get(param)
-                if err := self.scope.bind(param.name, param_shape, is_fun_param=True):
+                if err := self.scope.bind(param.name, param_shape):
                     return self.error(err)
                 params.append(Param(param.name, param_shape))
             self.visit(node.body, node)
@@ -709,7 +703,7 @@ class TypeCheck:
     def tc_fun_def_specialized(self, node: ast.FunDef, fun: FunShape) -> FunShape | ErrorShape:
         with self.child_scope(node):
             for param in fun.params:
-                if err := self.scope.bind(param.name, param.shape, is_fun_param=True, can_shadow_parent_scopes=True):
+                if err := self.scope.bind(param.name, param.shape):
                     return self.error(err)
             ast.walk(node, self.visit)
         return_typ = self.type_env.get(node.body)

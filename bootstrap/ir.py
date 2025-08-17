@@ -363,8 +363,7 @@ class Scope:
     parent: Scope | None
     names: dict[str, Reg]
 
-    def declare(self, name: str, reg: Reg) -> None:
-        assert name not in self.names, f"Variable {name} already declared in scope"
+    def bind(self, name: str, reg: Reg) -> None:
         self.names[name] = reg
 
     def find(self, name: str) -> Reg | None:
@@ -420,13 +419,13 @@ class FunGen:
             for param in spec.specialized.params:
                 typ = self.typ(param.shape)
                 reg = self.reg(typ)
-                self.scope.declare(param.name, reg)
+                self.scope.bind(param.name, reg)
                 params.append(reg)
         else:
             for p in fun_typ.params:
                 typ = self.typ(p.shape)
                 reg = self.reg(typ)
-                self.scope.declare(p.name, reg)
+                self.scope.bind(p.name, reg)
                 params.append(reg)
         result = self.typ(fun_typ.result)
         name = self.fun_name(fun_typ) if fun_def.name != "main" else "main"
@@ -656,8 +655,7 @@ class FunGen:
                 ast.walk(node, self.generate)
                 reg = self.node_regs[node.value.id]
                 src = node.target
-                if not self.scope.find(src.name):
-                    self.scope.declare(src.name, reg)
+                self.scope.bind(src.name, reg)
                 self.node_regs[node.id] = NoneReg
             case ast.BinaryExpr():
                 ast.walk(node, self.generate)

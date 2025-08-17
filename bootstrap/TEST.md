@@ -182,6 +182,31 @@ PASS
 PASS
 ```
 
+**Each assignment creates a new binding**
+
+```klarer
+main = fun():
+    a = 42
+    print(int_to_str(a))
+
+    a = "PASS"
+    print(a)
+
+    a = {name = "John", age = 42}
+    print(a.name)
+
+    a = {value = "PASS"}
+    print(a.value)
+end
+```
+
+```
+42
+PASS
+John
+PASS
+```
+
 ## Behaviour
 
 ```klarer

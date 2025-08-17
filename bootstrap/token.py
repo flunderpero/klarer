@@ -197,7 +197,7 @@ def tokenize(input: Input) -> tuple[list[Token], list[error.Error]]:
                 kind = Kind.char_lit
             case "@":
                 kind = Kind.behaviour_ident
-                value = ""
+                value = str(c)
                 while ((c := input.peek()).isalnum() and c.isascii()) or c == "_":
                     input.next()
                     value += c

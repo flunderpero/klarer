@@ -37,14 +37,14 @@ def test_complex_fun_def() -> None:
                 shape=node(
                     ast.ProductShape,
                     fields=[node(ast.Field, name="value", shape=str_shape)],
-                    behaviours=[node(ast.Behaviour, name="Value")],
+                    behaviours=[node(ast.Behaviour, name="@Value")],
                 ),
             ),
         ],
         result=node(
             ast.ProductShape,
             fields=[node(ast.Field, name="value", shape=str_shape)],
-            behaviours=[node(ast.Behaviour, name="Value")],
+            behaviours=[node(ast.Behaviour, name="@Value")],
         ),
         body=node(ast.Block, nodes=[]),
     )
@@ -93,7 +93,7 @@ def test_complex_shapes() -> None:
                         shape=node(
                             ast.ProductShape,
                             fields=[node(ast.Field, name="d", shape=bool_shape)],
-                            behaviours=[node(ast.Behaviour, name="Bar")],
+                            behaviours=[node(ast.Behaviour, name="@Bar")],
                         ),
                     )
                 ],
@@ -127,7 +127,7 @@ def test_shape_literal_with_behaviour() -> None:
     assert parse_first("{a = 42} + @Foo") == node(
         ast.ShapeLit,
         fields=[node(ast.ShapeLitField, name="a", value=node(ast.IntLit, value=42))],
-        behaviours=[node(ast.Behaviour, name="Foo")],
+        behaviours=[node(ast.Behaviour, name="@Foo")],
     )
 
 
@@ -148,7 +148,7 @@ def test_composite_product_shape_literal() -> None:
                             shape_ref=node(ast.ShapeRef, name="Foo"),
                         )
                     ],
-                    behaviours=[node(ast.Behaviour, name="Bar")],
+                    behaviours=[node(ast.Behaviour, name="@Bar")],
                 ),
             )
         ],
@@ -216,7 +216,7 @@ def test_behaviour_fun_def() -> None:
         node(
             ast.FunDef,
             name="bar",
-            namespace="Foo",
+            behaviour="@Foo",
             params=[node(ast.Param, name="foo", shape=str_shape)],
             result=unit_shape,
             body=node(ast.Block, nodes=[]),

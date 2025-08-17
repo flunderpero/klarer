@@ -93,7 +93,7 @@ class Parser:
             return t
         return t.value_str()
 
-    def expect_behaviour_ns(self) -> str | None:
+    def expect_behaviour_ident(self) -> str | None:
         t = self.expect(token.Kind.behaviour_ident)
         if t is None:
             return t
@@ -243,7 +243,7 @@ class Parser:
             composites.append(composite)
         while self.input.peek().kind == token.Kind.plus:
             self.input.next()
-            behaviour_name = self.expect_behaviour_ns()
+            behaviour_name = self.expect_behaviour_ident()
             if not behaviour_name:
                 return None
             behaviour = ast.Behaviour(self.id(), behaviour_name, self.input.span_merge(span))
@@ -254,8 +254,8 @@ class Parser:
 
     def parse_behaviour_fun_def(self) -> ast.FunDef | None:
         span = self.input.span()
-        namespace = self.expect_behaviour_ns()
-        if not namespace:
+        behaviour = self.expect_behaviour_ident()
+        if not behaviour:
             return None
         if not self.expect(token.Kind.dot):
             return None
@@ -264,9 +264,9 @@ class Parser:
             return None
         if not self.expect(token.Kind.eq):
             return None
-        return self.parse_fun_def(name, span, namespace)
+        return self.parse_fun_def(name, span, behaviour)
 
-    def parse_fun_def(self, name: str, span: Span, namespace: str | None = None) -> ast.FunDef | None:
+    def parse_fun_def(self, name: str, span: Span, behaviour: str | None = None) -> ast.FunDef | None:
         if not self.expect(token.Kind.fun):
             return None
         params: list[ast.Param] = []
@@ -298,7 +298,7 @@ class Parser:
         body, _ = self.parse_block()
         if not body:
             return None
-        return ast.FunDef(self.id(), name, namespace, params, result, body, self.input.span_merge(span))
+        return ast.FunDef(self.id(), name, behaviour, params, result, body, self.input.span_merge(span))
 
     def parse_if(self) -> ast.If | None:
         span = self.input.span()
@@ -467,7 +467,7 @@ class Parser:
         behaviours: list[ast.Behaviour] = []
         while self.input.peek().kind == token.Kind.plus:
             self.input.next()
-            behaviour_name = self.expect_behaviour_ns()
+            behaviour_name = self.expect_behaviour_ident()
             if not behaviour_name:
                 return None
             behaviour = ast.Behaviour(self.id(), behaviour_name, self.input.span_merge(span))

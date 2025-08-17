@@ -636,7 +636,7 @@ class FunGen:
                 fun = callee
                 ast.walk(node, self.generate)
                 args = [self.node_regs[x.id] for x in node.args]
-                if fun.namespace:
+                if fun.behaviour:
                     # This is a behaviour function call, prepend the receiver to the args.
                     assert isinstance(node.callee, ast.Member), f"Expected Member, got {node.callee}"
                     receiver = self.node_regs[node.callee.target.id]

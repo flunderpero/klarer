@@ -188,7 +188,7 @@ def test_behaviour() -> None:
     assert tc.at(1, 1, ast.FunDef) == shape(
         types.FunShape,
         name="print_value",
-        namespace="Value",
+        behaviour="@Value",
         params=(
             types.Param(
                 "v",
@@ -204,7 +204,7 @@ def test_behaviour() -> None:
         shape(
             types.FunShape,
             name="print_value",
-            namespace="Value",
+            behaviour="@Value",
             params=(
                 types.Param(
                     "v",

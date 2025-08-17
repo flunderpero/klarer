@@ -56,7 +56,7 @@ def node(kind: Callable, **kwargs: Any) -> ast.Node:
         case ast.IntLit:
             defaults.update({"bits": 64, "signed": True})
         case ast.FunDef:
-            defaults.update({"namespace": None})
+            defaults.update({"behaviour": None})
         case ast.If:
             defaults.update({"else_block": None})
         case ast.Name:
@@ -82,7 +82,7 @@ def shape(kind: Callable, **kwargs: Any) -> types.Shape:
         case types.ProductShape:
             defaults.update({"name": None, "fields": (), "behaviours": types.Behaviours(())})
         case types.FunShape:
-            defaults.update({"name": None, "builtin": False, "namespace": None})
+            defaults.update({"name": None, "builtin": False, "behaviour": None})
     return kind(**defaults | kwargs)
 
 

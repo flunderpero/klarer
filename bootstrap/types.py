@@ -18,7 +18,7 @@ class Behaviour:
     funs: tuple[FunShape, ...]
 
     def __str__(self) -> str:
-        return f"@{self.name}"
+        return self.name
 
     def is_same(self, other: Behaviour) -> bool:
         return self.name == other.name
@@ -295,7 +295,7 @@ class FunShape:
     name: str | None
     params: tuple[Param, ...]
     result: Shape
-    namespace: str | None
+    behaviour: str | None
     span: Span = field(compare=False, hash=False, repr=False)
     builtin: bool
 
@@ -306,7 +306,7 @@ class FunShape:
     def __str__(self) -> str:
         params = ", ".join(str(x) for x in self.params)
         name = f" {self.name}" if self.name else ""
-        name = f" @{self.namespace}.{name[1:]}" if self.namespace else name
+        name = f" {self.behaviour}.{name[1:]}" if self.behaviour else name
         return f"fun{name}({params}) -> {self.result}"
 
     def is_same(self, other: Shape) -> bool:
@@ -324,8 +324,8 @@ class FunShape:
         name = ""
         if self.name:
             name = self.name + "__"
-        if self.namespace:
-            name = self.namespace + "__" + name
+        if self.behaviour:
+            name = self.behaviour[1:] + "__" + name
         return name + "_".join(params)
 
     def conforms_to(self, other: Shape) -> bool:
@@ -423,7 +423,7 @@ class Scope:
         """The root scope with all the builtins."""
         span = Span("<builtin>", "", 0, 0)
         binding_defaults = {"builtin": True}
-        fun_defaults = {"namespace": None, "span": span, "builtin": True}
+        fun_defaults = {"behaviour": None, "span": span, "builtin": True}
         scope = Scope(None, None, {})
         scope.bindings["print"] = Binding(
             FunShape("print", (Param("s", Str),), Unit, **fun_defaults),
@@ -526,7 +526,7 @@ class TypeCheck:
         for param, arg in zip(base.params, call_args):
             shape = self.type_env.get(arg)
             params.append(Param(param.name, shape))
-        return FunShape(base.name, tuple(params), base.result, base.namespace, base.span, builtin=base.builtin)
+        return FunShape(base.name, tuple(params), base.result, base.behaviour, base.span, builtin=base.builtin)
 
     def specialize(self, fun: FunShape, call_args: list[ast.Expr], span: Span) -> FunSpec | ErrorShape:
         spec = self.fun_spec(fun, call_args)
@@ -646,7 +646,7 @@ class TypeCheck:
             return callee.result
 
         args = node.args
-        if callee.namespace:
+        if callee.behaviour:
             assert isinstance(node.callee, ast.Member), f"Expected Member, got {node.callee}"
             args = [node.callee.target, *args]
 
@@ -678,7 +678,7 @@ class TypeCheck:
             return body_shape
         if not body_shape.conforms_to(return_shape):
             return self.error(error.does_not_conform_to(str(body_shape), str(return_shape), node.span))
-        shape = FunShape(node.name, (*params,), return_shape, node.namespace, node.span, builtin=False)
+        shape = FunShape(node.name, (*params,), return_shape, node.behaviour, node.span, builtin=False)
         log("typechecker-trace", f"Adding {shape} to fun_defs", self.nesting_level)
         self.fun_defs[shape] = node
         if err := self.scope.bind(node.name, shape):
@@ -691,13 +691,13 @@ class TypeCheck:
                     return ErrorShape(error.cascaded_error(fun.result.error, node.span))
                 return self.error(error.invalid_main(node.span))
             self.fun_specs[fun] = [FunSpec(self.type_env, node, fun, fun)]
-        if node.namespace:
-            behaviour = self.behaviours.get(node.namespace)
+        if node.behaviour:
+            behaviour = self.behaviours.get(node.behaviour)
             behaviour_funs = []
             if behaviour:
                 behaviour_funs = list(behaviour.funs)
             behaviour_funs.append(shape)
-            self.behaviours[node.namespace] = Behaviour(node.namespace, tuple(behaviour_funs))
+            self.behaviours[node.behaviour] = Behaviour(node.behaviour, tuple(behaviour_funs))
         return shape
 
     def tc_fun_def_specialized(self, node: ast.FunDef, fun: FunShape) -> FunShape | ErrorShape:

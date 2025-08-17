@@ -126,12 +126,11 @@ class ShapeLit:
 @dataclass
 class Behaviour:
     id: NodeId = field(compare=False, hash=False, repr=False)
-    # todo: This should include the "@"
     name: str
     span: Span = field(compare=False, hash=False, repr=False)
 
     def __str__(self) -> str:
-        return nid(self.id) + f"@{self.name}"
+        return nid(self.id) + self.name
 
 
 @dataclass
@@ -315,14 +314,14 @@ class Param:
 class FunDef:
     id: NodeId = field(compare=False, hash=False, repr=False)
     name: str
-    namespace: str | None
+    behaviour: str | None
     params: list[Param]
     result: Shape
     body: Block
     span: Span = field(compare=False, hash=False, repr=False)
 
     def __str__(self) -> str:
-        ns = (f"@{self.namespace}.") if self.namespace is not None else ""
+        ns = (f"@{self.behaviour}.") if self.behaviour is not None else ""
         return nid(self.id) + f"{ns}{self.name}({', '.join(str(x) for x in self.params)}) {self.result} {self.body}"
 
 

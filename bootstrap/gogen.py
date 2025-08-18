@@ -72,7 +72,8 @@ def emit_fun_signature(name: str, params: list[ir.Reg], result: ir.Typ, code: Co
         code.write(", ")
     code.write(") ")
     if not isinstance(result, ir.NoneTyp):
-        code.write(f"{typ(result)} ")
+        ref = "*" if isinstance(result, ir.Struct) else ""
+        code.write(f"{ref}{typ(result)} ")
 
 
 class FuncGen:

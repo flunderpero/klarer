@@ -22,6 +22,18 @@ class Int:
 
 
 @dataclass
+class Char:
+    def __str__(self) -> str:
+        return "Char"
+
+
+@dataclass
+class Bool:
+    def __str__(self) -> str:
+        return "Bool"
+
+
+@dataclass
 class Str:
     def __str__(self) -> str:
         return "Str"
@@ -70,7 +82,7 @@ class NoneTyp:
         return "none"
 
 
-Typ = Int | Struct | Fun | Ptr | Str | NoneTyp | List
+Typ = Int | Char | Bool | Struct | Fun | Ptr | Str | NoneTyp | List
 
 
 I1 = Int(bits=1, signed=True)
@@ -82,7 +94,6 @@ I32 = Int(bits=32, signed=True)
 U32 = Int(bits=32, signed=False)
 I64 = Int(bits=64, signed=True)
 U64 = Int(bits=64, signed=False)
-Char = I64  # todo: Change it to U32 once we support int types other than I64
 
 RegId = str
 
@@ -107,6 +118,18 @@ NoneReg = Reg("_none", NoneTyp())
 
 @dataclass
 class IntConst:
+    reg: Reg
+    value: int
+
+    def __str__(self) -> str:
+        return f"{self.reg.id} = {self.value}"
+
+    def regs(self) -> list[Reg]:
+        return [self.reg]
+
+
+@dataclass
+class CharConst:
     reg: Reg
     value: int
 
@@ -552,9 +575,9 @@ class FunGen:
             case types.PrimitiveShape():
                 match shape.name:
                     case "Bool":
-                        return I1
+                        return Bool()
                     case "Char":
-                        return Char
+                        return Char()
                     case "Int":
                         return I64
                     case "Str":
@@ -666,13 +689,13 @@ class FunGen:
                     self.ir.constant_pool[node.value] = const
                 self.emit(GetPtr(reg=self.reg(Str()), src=const.reg), node)
             case ast.CharLit():
-                reg = self.reg(Char)
+                reg = self.reg(Char())
                 self.emit(IntConst(reg, value=ord(node.value)), node)
             case ast.IntLit():
                 reg = self.reg(I64)
                 self.emit(IntConst(reg, value=node.value), node)
             case ast.BoolLit():
-                reg = self.reg(I1)
+                reg = self.reg(Bool())
                 self.emit(IntConst(reg, value=int(node.value)), node)
             case ast.ListLit():
                 ast.walk(node, self.generate)
@@ -797,7 +820,7 @@ class FunGen:
                         match lhs_reg.typ:
                             case Int():
                                 op = ICmpOp.eq if node.op == ast.BinaryOp.eq else ICmpOp.ne
-                                reg = self.reg(I1)
+                                reg = self.reg(Bool())
                                 self.emit(ICmp(reg, op, lhs_reg, rhs_reg), node)
                             case _:
                                 raise AssertionError(f"Unsupported type for equality comparison: {lhs_reg.typ}")

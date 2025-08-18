@@ -7,9 +7,6 @@ from . import ir
 
 map_builtins = {
     "print": "Print",
-    "int_to_str": "IntToStr",
-    "bool_to_str": "BoolToStr",
-    "char_to_str": "CharToStr",
 }
 
 
@@ -45,9 +42,11 @@ class Code:
 def typ(ir_typ: ir.Typ) -> str:
     match ir_typ:
         case ir.Int():
-            if ir_typ.bits == 1:
-                return "bool"
             return "int"
+        case ir.Char():
+            return "rune"
+        case ir.Bool():
+            return "bool"
         case ir.Ptr():
             # todo: unify the handling of struct pointers
             ref = "*" if isinstance(ir_typ.typ, ir.Struct) else ""
@@ -131,11 +130,16 @@ class FuncGen:
             case ir.GetFunPtr():
                 code.writeln(f"{inst_reg} = {inst.src.fqn}")
             case ir.IntConst():
-                assert isinstance(inst.reg.typ, ir.Int)
-                if inst.reg.typ.bits == 1:
-                    code.writeln(f"{inst_reg} = {inst.value} != 0")
-                else:
-                    code.writeln(f"{inst_reg} = {inst.value}")
+                match inst.reg.typ:
+                    case ir.Int():
+                        code.writeln(f"{inst_reg} = {inst.value}")
+                    case ir.Char():
+                        code.writeln(f"{inst_reg} = {inst.value}")
+                    case ir.Bool():
+                        value = "true" if inst.value else "false"
+                        code.writeln(f"{inst_reg} = {value}")
+                    case _:
+                        raise AssertionError(f"Unexpected type: {inst.reg.typ}")
             case ir.ListConst():
                 assert isinstance(inst.reg.typ, ir.List)
                 # todo: unify the handling of struct pointers

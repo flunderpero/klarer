@@ -45,7 +45,7 @@ main = fun():
     print(get_value(str_value))
 
     int_value = {value = 42, text = "forty two"}
-    print(int_to_str(get_value(int_value)))
+    print(get_value(int_value))
 end
 
 ```
@@ -200,7 +200,7 @@ map = fun(in {}, f fun(in {}) {}) {}:
 end
 
 itoa = fun(in Int) Str:
-    int_to_str(in)
+    in.to_str()
 end
 
 main = fun():
@@ -234,7 +234,7 @@ map_value = fun(in {value {}}, f fun(in {}) {}) {}:
 end
 
 itoa = fun(in Int) Str:
-    int_to_str(in)
+    in.to_str()
 end
 
 main = fun():
@@ -305,14 +305,14 @@ Klarer has these kinds of values:
 
 main = fun():
     -- Bool
-    print(bool_to_str(true))
-    print(bool_to_str(false))
+    print(true)
+    print(false)
 
     -- Char
-    print(char_to_str('c'))
+    print('c')
 
     -- Int
-    print(int_to_str(42))
+    print(42)
 
     -- Str
     print("PASS")
@@ -459,7 +459,7 @@ main = fun():
         "PASS",
         =>
             print($0)
-            print(int_to_str($1)),
+            print($1),
         42
     )
 end
@@ -624,11 +624,11 @@ main = fun():
 
     -- Traditional: rebuilds the tree.
     tree1 = inc_count_functional(tree, 2)
-    print(int_to_str(tree1.left.count))
+    print(tree1.left.count)
 
     -- Mutation block: modifies in place, returns modified tree.
     tree2 = inc_count_mutate_block(tree, 2)
-    print(int_to_str(tree2.left.count))
+    print(tree2.left.count)
 end
 
 ```

@@ -52,9 +52,8 @@ PASS
 ```klarer
 main = fun():
     t = true
-    f = false
-    print(bool_to_str(t))
-    print(bool_to_str(f))
+    print(t)
+    print(false)
 end
 ```
 
@@ -82,10 +81,10 @@ false
 
 ```klarer
 main = fun():
-    print(bool_to_str(1 == 2))
-    print(bool_to_str(1 == 1))
-    print(bool_to_str(2 != 2))
-    print(bool_to_str(1 != 2))
+    print(1 == 2)
+    print(1 == 1)
+    print(2 != 2)
+    print(1 != 2)
 end
 ```
 
@@ -104,8 +103,8 @@ For now, we only support `Int` which is a 64-bit signed integer.
 main = fun():
     a = 42
     b = -42
-    print(int_to_str(a))
-    print(int_to_str(b))
+    print(a)
+    print(b)
 end
 ```
 
@@ -135,8 +134,8 @@ end
 main = fun():
     a = 9223372036854775807
     b = -9223372036854775808
-    print(int_to_str(a))
-    print(int_to_str(b))
+    print(a)
+    print(b)
 end
 ```
 
@@ -150,16 +149,16 @@ end
 ```klarer
 main = fun():
     a = 40 + 2
-    print(int_to_str(a))
+    print(a)
 
     b = 140 - 3
-    print(int_to_str(b))
+    print(b)
 
     c = 3 * 4
-    print(int_to_str(c))
+    print(c)
 
     d = 5 / 2
-    print(int_to_str(d))
+    print(d)
 end
 ```
 
@@ -175,7 +174,7 @@ end
 ```klarer
 main = fun():
     a = 'a'
-    print(char_to_str(a))
+    print(a)
 end
 ```
 
@@ -238,8 +237,8 @@ Jane
 
 main = fun():
     list = [42, 137]
-    print(int_to_str(list[0]))
-    print(int_to_str(list[1]))
+    print(list[0])
+    print(list[1])
 end
 ```
 
@@ -271,7 +270,7 @@ main = fun():
     end
     match list[1]:
         case Int:
-            print(int_to_str(list[1]))
+            print(list[1])
         case _:
             print("FAIL")
     end
@@ -396,7 +395,7 @@ PASS
 ```klarer
 main = fun():
     a = 42
-    print(int_to_str(a))
+    print(a)
 
     a = "PASS"
     print(a)
@@ -502,17 +501,21 @@ PASS
 **Interface implementations must match the interface at call-site**
 
 ```klarer
-@MyToStr.to_str = fun(obj {}) Str
+@MyToStr.my_to_str = fun(obj {}) Str
 
 -- Here we return an Int instead of a Str.
-@Value.to_str = fun(obj {value Str}) Int:
+@Value.my_to_str = fun(obj {value Str}) Int:
     42
 end
 
 Value = {value Str} + @Value
 
+-- This function is only there to force an error if we try to call it with a non-Str.
+is_str = fun(v Str): end
+
 print_my_to_str = fun(v {} + @MyToStr):
-    print(v.to_str())
+    is_str(v) -- This will error when we call `print_my_to_str` with `Value`.
+    print(v.my_to_str())
 end
 
 main = fun():
@@ -533,6 +536,31 @@ end
 @Value.bar = fun() Str
 
 @Value.foo = fun(): end -- ERROR: Cannot add method `fun @Value.foo() -> <unit>` to interface behaviour `@Value(interface)`.
+```
+
+#### Builtin Interface Behaviours
+
+> [!TODO]
+> We need to implement `print` in Klarer code so this will work.
+> Currently, `print` is a runtime function, so it does not force the
+> monomorphization to `print(obj Person)` to happen which would in turn
+> call `Person.to_str`.
+
+```todo
+Person = {name Str, age Int} + @Person
+
+@Person.to_str = fun(p Person) Str:
+    p.name
+end
+
+main = fun():
+    p = Person{name = "John", age = 42}
+    print(p)
+end
+```
+
+```
+John
 ```
 
 ## Forward Declarations
@@ -691,7 +719,7 @@ end
 
 main = fun():
     v = bar(2)
-    print(int_to_str(v))
+    print(v)
 end
 ```
 

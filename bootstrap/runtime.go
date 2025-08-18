@@ -6,7 +6,24 @@ import (
 	"strconv"
 )
 
-func Print(s string) {
+type ToStr interface {
+	to_str(obj any) string
+}
+
+func Print(obj any) {
+	var s string
+	switch obj := obj.(type) {
+	case string:
+		s = obj
+	case int:
+		s = Int__to_str(obj)
+	case bool:
+	    s = Bool__to_str(obj)
+	case rune:
+		s = Char__to_str(obj)
+	default:
+		panic("cannot print object")
+	}
 	os.Stdout.WriteString(s + "\n")
 }
 
@@ -38,8 +55,8 @@ func Bool__to_str(b bool) string {
 	}
 }
 
-func Char__to_str(c int) string {
-	return string(rune(c))
+func Char__to_str(c rune) string {
+	return string(c)
 }
 
 func Str__to_str(s string) string {

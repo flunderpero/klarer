@@ -188,8 +188,8 @@ class ProductShape:
     span: Span = field(compare=False, hash=False, repr=False)
 
     @staticmethod
-    def empty(span: Span) -> ProductShape:
-        return ProductShape(None, (), Behaviours((), Scope.root()), span)
+    def empty(span: Span, scope: Scope) -> ProductShape:
+        return ProductShape(None, (), Behaviours((), scope), span)
 
     def is_named(self) -> bool:
         return self.name is not None
@@ -426,21 +426,29 @@ class Scope:
         str_shape = PrimitiveShape("Str", Behaviours(("@Str",), scope), span)
         unit_shape = UnitShape(Behaviours((), scope), span)
         binding_defaults = {"builtin": True}
-        fun_defaults = {"behaviour": None, "span": span, "builtin": True}
+        fun_defaults = {"span": span, "builtin": True}
+        to_str_shape = ProductShape.empty(span, scope)
+        to_str_shape = replace(to_str_shape, behaviours=Behaviours(("@ToStr",), scope))
         scope.bindings["print"] = Binding(
-            FunShape("print", (Param("s", str_shape),), unit_shape, **fun_defaults),
+            FunShape("print", (Param("obj", to_str_shape),), unit_shape, behaviour=None, **fun_defaults),
             **binding_defaults,
         )
-        scope.bindings["int_to_str"] = Binding(
-            FunShape("int_to_str", (Param("i", int_shape),), str_shape, **fun_defaults),
-            **binding_defaults,
-        )
-        scope.bindings["char_to_str"] = Binding(
-            FunShape("char_to_str", (Param("c", char_shape),), str_shape, **fun_defaults),
-            **binding_defaults,
-        )
-        scope.bindings["bool_to_str"] = Binding(
-            FunShape("bool_to_str", (Param("b", bool_shape),), str_shape, **fun_defaults),
+
+        # Default behaviour interfaces.
+        scope.bindings["@ToStr"] = Binding(
+            Behaviour(
+                "@ToStr",
+                (
+                    FunShape(
+                        "to_str",
+                        (Param("obj", ProductShape.empty(span, scope)),),
+                        str_shape,
+                        behaviour="@ToStr",
+                        **fun_defaults,
+                    ),
+                ),
+                interface=True,
+            ),
             **binding_defaults,
         )
 
@@ -448,7 +456,7 @@ class Scope:
         scope.bindings["@Int"] = Binding(
             Behaviour(
                 "@Int",
-                (FunShape("to_str", (Param("i", int_shape),), str_shape, behaviour="@Int", builtin=True, span=span),),
+                (FunShape("to_str", (Param("i", int_shape),), str_shape, behaviour="@Int", **fun_defaults),),
                 interface=False,
             ),
             **binding_defaults,
@@ -456,7 +464,7 @@ class Scope:
         scope.bindings["@Bool"] = Binding(
             Behaviour(
                 "@Bool",
-                (FunShape("to_str", (Param("b", bool_shape),), str_shape, behaviour="@Bool", builtin=True, span=span),),
+                (FunShape("to_str", (Param("b", bool_shape),), str_shape, behaviour="@Bool", **fun_defaults),),
                 interface=False,
             ),
             **binding_defaults,
@@ -464,7 +472,7 @@ class Scope:
         scope.bindings["@Char"] = Binding(
             Behaviour(
                 "@Char",
-                (FunShape("to_str", (Param("c", char_shape),), str_shape, behaviour="@Char", builtin=True, span=span),),
+                (FunShape("to_str", (Param("c", char_shape),), str_shape, behaviour="@Char", **fun_defaults),),
                 interface=False,
             ),
             **binding_defaults,
@@ -472,7 +480,7 @@ class Scope:
         scope.bindings["@Str"] = Binding(
             Behaviour(
                 "@Str",
-                (FunShape("to_str", (Param("s", str_shape),), str_shape, behaviour="@Str", builtin=True, span=span),),
+                (FunShape("to_str", (Param("s", str_shape),), str_shape, behaviour="@Str", **fun_defaults),),
                 interface=False,
             ),
             **binding_defaults,
@@ -914,7 +922,7 @@ class TypeCheck:
                 # todo: for now, all values in a list must have the same type.
                 return self.error(error.is_not_same(str(shape), str(value_shape), value_node.span))
         if shape is None:
-            shape = ProductShape.empty(node.span)
+            shape = ProductShape.empty(node.span, self.scope)
         return ListShape(shape, Behaviours((), self.scope), node.span)
 
     def tc_list_shape(self, node: ast.ListShape) -> Shape:

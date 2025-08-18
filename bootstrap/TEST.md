@@ -509,7 +509,7 @@ end
 
 **Mutually recursive functions are monomorphized**
 
-```todo
+```klarer
 foo = fun(n Int) Int:
     if
       case n == 0:

@@ -518,19 +518,21 @@ class TypeCheck:
             params.append(Param(param.name, shape))
         return FunShape(base.name, tuple(params), base.result, base.behaviour, base.span, builtin=base.builtin)
 
-    def specialize(self, fun: FunShape, call_args: list[ast.Expr], span: Span) -> FunSpec | ErrorShape:
-        spec = self.fun_spec(fun, call_args)
-        if spec:
-            return spec
+    def specialize(self, base: FunShape, call_args: list[ast.Expr], span: Span) -> FunSpec | ErrorShape:
         with self.child_type_env():
-            fun_def = self.fun_defs[fun]
-            log("typechecker-mono", f">>> Specializing {fun} at call-site {span}", self.nesting_level)
-
-            base = self.type_env.get(fun_def)
-            assert isinstance(base, FunShape)
+            fun_def = self.fun_defs[base]
             specialized = self.build_specialized(base, call_args)
 
+            specs = self.fun_specs.get(base, [])
+            for spec in specs:
+                if spec.specialized == specialized:
+                    return spec
+
+            log("typechecker-mono", f">>> Specializing {base} at call-site {span}", self.nesting_level)
             spec = FunSpec(self.type_env, fun_def, base, specialized)
+            specs.append(spec)
+            if fun_def.body is not None:
+                self.fun_specs[base] = specs
 
             log(
                 "typechecker-mono",
@@ -554,17 +556,11 @@ class TypeCheck:
                     error.does_not_conform_to(str(spec.specialized), str(spec.base), span, spec.base.span, err)
                 )
 
-            if fun_def.body is None:
-                # This is an interface method.
-                return spec
             log(
                 "typechecker-mono",
                 f"<<< Specialized {spec.base} at call-site {span} as {spec.specialized}",
                 self.nesting_level,
             )
-            specs = self.fun_specs.get(fun, [])
-            specs.append(spec)
-            self.fun_specs[fun] = specs
             return spec
 
     @contextmanager

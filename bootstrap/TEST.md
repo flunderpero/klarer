@@ -325,3 +325,167 @@ end
 
 @Value.foo = fun(): end -- ERROR: Cannot add method `fun @Value.foo() -> <unit>` to interface behaviour `@Value(interface)`.
 ```
+
+## Forward Declarations
+
+**Functions are forward declared**
+
+```klarer
+
+main = fun():
+    print(pass("PASS"))
+end
+
+pass = fun(s Str) Str:
+    s
+end
+
+```
+
+```
+PASS
+```
+
+**Shape aliases are forward declared**
+
+```klarer
+
+main = fun():
+    p = Person{name = "John", age = 42}
+    print_person_name(p)
+end
+
+-- We use the forward declared `Person` as a parameter shape.
+print_person_name = fun(p Person):
+    p.print_name()
+end
+
+-- We use the forward declared `Person` as a parameter shape of a behaviour method.
+@Person.print_name = fun(p Person):
+    print(p.name)
+end
+
+Person = {name Str, age Int} + @Person
+```
+
+```
+John
+```
+
+**Forward declared shape aliases can be used in shape aliases**
+
+```klarer
+Container = {item Item, count Int}
+
+Item = {value Str}
+
+main = fun():
+    c = Container{item = Item{value = "PASS"}, count = 1}
+    print(c.item.value)
+end
+```
+
+```
+PASS
+```
+
+**Forward declared behaviours can be used in shape aliases and literals**
+
+```klarer
+
+main = fun():
+    p = Person{name = "John", age = 42}
+    p.print_name()
+
+    p = {name = "Jane", age = 24} + @Person
+    p.print_name()
+end
+
+Person = {name Str, age Int} + @Person
+
+@Person.print_name = fun(p Person):
+    print(p.name)
+end
+
+```
+
+```
+John
+Jane
+```
+
+**Composing with forward declared shape aliases**
+
+> [!TODO]
+> We don't yet support `Base + ...` syntax. We need to remove `ast.ProductShape.composites`
+> (and `.behaviours`) and introduce a new `ast.ShapeComp` node.
+
+```todo
+Combined = Base + {extra Int}
+
+Base = {value Str}
+
+main = fun():
+    c = Combined{value = "PASS", extra = 42}
+    print(c.value)
+end
+```
+
+```
+PASS
+```
+
+### Recursive Shapes
+
+**Declaring a recursive shape alias**
+
+> [!TODO]
+> Until we have sum types, we cannot create a literal for a recursive shape alias.
+> So for now, we just check that we can declare recursive shape aliases.
+
+```klarer
+
+Person = {name Str, age Int, parent Person}
+
+main = fun():
+end
+```
+
+**Declaring mutually recursive shape aliases**
+
+```klarer
+
+Address = {street Str, city Str, main Person}
+Person = {name Str, age Int, address Address}
+
+main = fun():
+end
+```
+
+## Monomorphization
+
+**Mutually recursive functions are monomorphized**
+
+```todo
+foo = fun(n Int) Int:
+    if
+      case n == 0:
+        42
+      else:
+        bar(n - 1)
+    end
+end
+
+bar = fun(n Int) Int:
+    foo(n)
+end
+
+main = fun():
+    v = bar(2)
+    print(int_to_str(v))
+end
+```
+
+```
+42
+```

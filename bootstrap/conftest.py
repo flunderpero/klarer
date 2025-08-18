@@ -78,9 +78,9 @@ def shape(kind: Callable, **kwargs: Any) -> types.Shape:
     defaults: Any = {"span": Span("test.kl", "", 0, 0)}
     match kind:
         case types.PrimitiveShape:
-            defaults.update({"name": None, "behaviours": types.Behaviours(())})
+            defaults.update({"name": None, "behaviours": types.Behaviours((), types.Scope.empty())})
         case types.ProductShape:
-            defaults.update({"name": None, "fields": (), "behaviours": types.Behaviours(())})
+            defaults.update({"name": None, "fields": (), "behaviours": types.Behaviours((), types.Scope.empty())})
         case types.FunShape:
             defaults.update({"name": None, "builtin": False, "behaviour": None})
     return kind(**defaults | kwargs)

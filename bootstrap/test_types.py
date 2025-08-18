@@ -114,7 +114,7 @@ def test_simple_product_shape() -> None:
     """)
     assert tc.at(1, 1, ast.ProductShape) == shape(
         types.ProductShape,
-        fields=(types.Field("name", types.Str), types.Field("age", types.Int)),
+        fields=(types.Field.with_shape("name", types.Str), types.Field.with_shape("age", types.Int)),
     )
 
 
@@ -128,13 +128,13 @@ def test_shape_literal_basics() -> None:
     """)
     assert tc.at(1, 1, ast.ProductShape) == shape(
         types.ProductShape,
-        fields=(types.Field("name", types.Str), types.Field("age", types.Int)),
+        fields=(types.Field.with_shape("name", types.Str), types.Field.with_shape("age", types.Int)),
     )
     assert str(tc.at(4, 1, ast.ShapeLit)) == str(
         shape(
             types.ProductShape,
             name="Person",
-            fields=(types.Field("name", types.Str), types.Field("age", types.Int)),
+            fields=(types.Field.with_shape("name", types.Str), types.Field.with_shape("age", types.Int)),
         )
     )
 
@@ -164,7 +164,11 @@ def test_shape_literal_can_conform_to_shape_alias() -> None:
     assert tc.at(3, 1, ast.Name) == shape(
         types.ProductShape,
         name="Value",
-        fields=(types.Field("value", shape(types.ProductShape, fields=(types.Field("name", types.Str),))),),
+        fields=(
+            types.Field.with_shape(
+                "value", shape(types.ProductShape, fields=(types.Field.with_shape("name", types.Str),))
+            ),
+        ),
     )
 
 
@@ -194,7 +198,7 @@ def test_behaviour() -> None:
                 "v",
                 shape(
                     types.ProductShape,
-                    fields=(types.Field("value", shape(types.PrimitiveShape, name="Str")),),
+                    fields=(types.Field.with_shape("value", shape(types.PrimitiveShape, name="Str")),),
                 ),
             ),
         ),
@@ -210,7 +214,7 @@ def test_behaviour() -> None:
                     "v",
                     shape(
                         types.ProductShape,
-                        fields=(types.Field("value", types.Str),),
+                        fields=(types.Field.with_shape("value", types.Str),),
                         behaviours=("@Value",),
                     ),
                 ),
@@ -235,7 +239,7 @@ def test_polymorphism() -> None:
     assert tc.at(8, 1, ast.Call) == shape(
         types.ProductShape,
         fields=(
-            types.Field("a", types.Int),
-            types.Field("b", types.Str),
+            types.Field.with_shape("a", types.Int),
+            types.Field.with_shape("b", types.Str),
         ),
     )

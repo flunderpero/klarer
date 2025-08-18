@@ -34,7 +34,8 @@ class Behaviour:
 
 @dataclass(eq=True, frozen=True)
 class Behaviours:
-    behaviours: tuple[Behaviour, ...]
+    behaviours: tuple[str, ...]
+    scope: Scope = field(compare=False, hash=False, repr=False)
 
     # def not_conforms_to(self, other: Behaviours) -> error.Error | None:
     #     """`self` conforms to `other` if it has at least all the behaviour _function_ of `other`."""
@@ -51,16 +52,12 @@ class Behaviours:
     #             )
     #     return None
 
-    def functions(self) -> tuple[FunShape, ...]:
-        funs = set()
-        for behaviour in self.behaviours:
-            for fun in behaviour.funs:
-                funs.add(fun)
-        return tuple(funs)
-
     def fun(self, name: str) -> FunShape | None:
-        for behaviour in reversed(self.behaviours):
-            fun = behaviour.fun(name)
+        for behaviour_name in reversed(self.behaviours):
+            behaviour_binding = self.scope.lookup(behaviour_name)
+            assert behaviour_binding is not None, f"Behaviour {behaviour_name} not found"
+            assert isinstance(behaviour_binding.value, Behaviour)
+            fun = behaviour_binding.value.fun(name)
             if fun:
                 return fun
         return None
@@ -70,7 +67,8 @@ class Behaviours:
         for behaviour in other.behaviours:
             if behaviour not in behaviours:
                 behaviours.append(behaviour)
-        return Behaviours(tuple(behaviours))
+        scope = self.scope if other.scope.is_child_of(self.scope) else other.scope
+        return Behaviours(tuple(behaviours), scope)
 
     def __str__(self) -> str:
         return " + ".join(str(x) for x in self.behaviours)
@@ -104,7 +102,7 @@ class PrimitiveShape:
 
 @dataclass(eq=True, frozen=True)
 class UnitShape:
-    behaviours = Behaviours(())
+    behaviours: Behaviours
     span: Span = field(compare=False, hash=False, repr=False)
 
     def __str__(self) -> str:
@@ -119,16 +117,41 @@ class UnitShape:
         return None
 
 
-@dataclass(eq=True, frozen=True)
+@dataclass(frozen=True)
 class Field:
     name: str
-    shape: Shape
+    scope: Scope = field(compare=False, hash=False, repr=False)
+    shape_: Shape | None
+    shape_name: str
+
+    @staticmethod
+    def with_shape(name: str, shape: Shape) -> Field:
+        return Field(name, Scope.empty(), shape, name)
+
+    @staticmethod
+    def with_shape_name(name: str, shape_name: str, scope: Scope) -> Field:
+        return Field(name, scope, None, shape_name)
+
+    @property
+    def shape(self) -> Shape:
+        if self.shape_ is not None:
+            return self.shape_
+        binding = self.scope.lookup(self.shape_name)
+        assert binding is not None, f"ShapeRef bindings should always be found: {self.shape_name}"
+        assert isinstance(binding.value, Shape), f"Expected Shape, got {binding.value}"
+        return binding.value
 
     def __str__(self) -> str:
         return self.name + " " + str(self.shape)
 
     def mangled_name(self) -> str:
         return self.name + "_" + self.shape.mangled_name()
+
+    def __eq__(self, other: object) -> bool:
+        return isinstance(other, Field) and self.name == other.name and self.shape == other.shape
+
+    def __hash__(self) -> int:
+        return hash((self.name, self.shape))
 
 
 def same_tuple(a: tuple[Any, ...], b: tuple[Any, ...]) -> bool:
@@ -148,7 +171,7 @@ class ProductShape:
 
     @staticmethod
     def empty(span: Span) -> ProductShape:
-        return ProductShape(None, (), Behaviours(()), span)
+        return ProductShape(None, (), Behaviours((), Scope.root()), span)
 
     def is_named(self) -> bool:
         return self.name is not None
@@ -329,13 +352,6 @@ class ErrorShape:
 
 Shape = PrimitiveShape | ProductShape | SumShape | FunShape | UnitShape | ErrorShape
 
-builtin_span = Span("<builtin", "", 0, 0)
-Bool = PrimitiveShape("Bool", Behaviours(()), builtin_span)
-Char = PrimitiveShape("Char", Behaviours(()), builtin_span)
-Int = PrimitiveShape("Int", Behaviours(()), builtin_span)
-Str = PrimitiveShape("Str", Behaviours(()), builtin_span)
-Unit = UnitShape(builtin_span)
-
 
 @dataclass
 class TypeEnv:
@@ -354,17 +370,17 @@ class TypeEnv:
         self.node_shapes[node.id] = shape
 
     def get(self, node: ast.Node) -> Shape:
-        typ = self.node_shapes.get(node.id)
-        if typ is None and self.parent:
-            typ = self.parent.get(node)
-        if typ is None:
-            raise KeyError(f"Type for {node} not found")
-        return typ
+        shape = self.node_shapes.get(node.id)
+        if shape is None and self.parent:
+            shape = self.parent.get(node)
+        if shape is None:
+            raise KeyError(f"Shape for {node} not found")
+        return shape
 
 
 @dataclass
 class Binding:
-    shape: Shape
+    value: Shape | Behaviour
     builtin: bool
 
 
@@ -373,6 +389,10 @@ class Scope:
     node: ast.Node | None
     parent: Scope | None
     bindings: dict[str, Binding]
+
+    @staticmethod
+    def empty() -> Scope:
+        return Scope(None, None, {})
 
     @staticmethod
     def root() -> Scope:
@@ -410,7 +430,7 @@ class Scope:
             return self.parent.lookup(name)
         return None
 
-    def bind(self, name: str, shape: Shape) -> None:
+    def bind(self, name: str, shape: Shape | Behaviour) -> None:
         """Bind the name to the typ overwriting any existing binding."""
         self.bindings[name] = Binding(shape, builtin=False)
 
@@ -421,6 +441,22 @@ class Scope:
                 return s.node
             s = s.parent
         return None
+
+    def is_child_of(self, other: Scope) -> bool:
+        s = self
+        while s:
+            if s == other:
+                return True
+            s = s.parent
+        return False
+
+
+builtin_span = Span("<builtin", "", 0, 0)
+Bool = PrimitiveShape("Bool", Behaviours((), Scope.empty()), builtin_span)
+Char = PrimitiveShape("Char", Behaviours((), Scope.empty()), builtin_span)
+Int = PrimitiveShape("Int", Behaviours((), Scope.empty()), builtin_span)
+Str = PrimitiveShape("Str", Behaviours((), Scope.empty()), builtin_span)
+Unit = UnitShape(Behaviours((), Scope.empty()), builtin_span)
 
 
 @dataclass
@@ -442,7 +478,6 @@ class TypeCheck:
     scope: Scope
     fun_specs: dict[FunShape, list[FunSpec]]
     fun_defs: dict[FunShape, ast.FunDef]
-    behaviours: dict[str, Behaviour]
     nesting_level = 0
 
     def __init__(self) -> None:
@@ -451,7 +486,6 @@ class TypeCheck:
         self.scope = Scope.root()
         self.fun_specs = {}
         self.fun_defs = {}
-        self.behaviours = {}
         for name, fun in (x for x in inspect.getmembers(self, inspect.ismethod) if x[0].startswith("tc_")):
 
             def make_wrapper(fun: Callable) -> Any:
@@ -555,6 +589,43 @@ class TypeCheck:
         self.errors.append(err)
         return ErrorShape(err)
 
+    def forward_declare(self, nodes: list[ast.Node]) -> error.Error | None:
+        fun_defs = [x for x in nodes if isinstance(x, ast.FunDef)]
+        shape_aliases = [x for x in nodes if isinstance(x, ast.ShapeAlias)]
+
+        # Phase 1: Declare the names with basic shapes.
+        for node in shape_aliases:
+            shape = FunShape(node.name, (), Unit, None, node.span, builtin=False)
+            log("typechecker-trace", f"Forward declaring phase 1: {shape}", self.nesting_level)
+            self.scope.bind(node.name, shape)
+        for node in fun_defs:
+            shape = FunShape(node.name, (), Unit, None, node.span, builtin=False)
+            log("typechecker-trace", f"Forward declaring phase 1: {shape}", self.nesting_level)
+            self.scope.bind(node.name, shape)
+            if node.behaviour:
+                behaviour_binding = self.scope.lookup(node.behaviour)
+                if behaviour_binding is None:
+                    log(
+                        "typechecker-trace",
+                        f"Forward declaring phase 1: {node.behaviour}",
+                        self.nesting_level,
+                    )
+                    self.scope.bind(node.behaviour, Behaviour(node.behaviour, (), interface=node.body is None))
+
+        # Phase 2: Declare the correct shapes.
+        for node in shape_aliases:
+            shape = self.tc_shape_alias(node)
+            self.scope.bind(node.name, shape)
+            self.type_env.set(node, shape)
+        for node in fun_defs:
+            shape = self.tc_fun_decl(node)
+            self.type_env.set(node, shape)
+            if isinstance(shape, ErrorShape):
+                return shape.error
+            log("typechecker-trace", f"Forward declaring phase 2: {shape}", self.nesting_level)
+            self.scope.bind(node.name, shape)
+        return None
+
     def tc_assign(self, node: ast.Assign) -> Shape:
         self.visit(node.value, None)
         value = self.type_env.get(node.value)
@@ -570,7 +641,12 @@ class TypeCheck:
         shape = self.type_env.get(node.shape)
         if isinstance(shape, ErrorShape):
             return shape
-        return ProductShape(None, (Field(node.name, shape),), Behaviours(()), node.span)
+        field = None
+        if isinstance(node.shape, ast.ShapeRef):
+            field = Field.with_shape_name(node.name, node.shape.name, self.scope)
+        else:
+            field = Field.with_shape(node.name, shape)
+        return ProductShape(None, (field,), Behaviours((), self.scope), node.span)
 
     def tc_behaviour(self, _node: ast.Behaviour) -> Shape:
         return Unit
@@ -623,17 +699,14 @@ class TypeCheck:
 
         return callee.result
 
-    def tc_fun_def(self, node: ast.FunDef) -> Shape:
+    def tc_fun_decl(self, node: ast.FunDef) -> FunShape | ErrorShape:
         params: list[Param] = []
-        with self.child_scope(node):
-            for param in node.params:
-                self.visit(param, node)
-                param_shape = self.type_env.get(param)
-                if err := self.scope.bind(param.name, param_shape):
-                    return self.error(err)
-                params.append(Param(param.name, param_shape))
-            if node.body:
-                self.visit(node.body, node)
+        for param in node.params:
+            self.visit(param, node)
+            param_shape = self.type_env.get(param)
+            if isinstance(param_shape, ErrorShape):
+                return param_shape
+            params.append(Param(param.name, param_shape))
         self.visit(node.result, node)
         return_shape = self.type_env.get(node.result)
         if isinstance(return_shape, ErrorShape):
@@ -642,9 +715,12 @@ class TypeCheck:
         log("typechecker-trace", f"Adding {shape} to fun_defs", self.nesting_level)
         self.fun_defs[shape] = node
         if node.behaviour:
-            behaviour = self.behaviours.get(node.behaviour)
+            log("typechecker-trace", f"Adding {shape} to behaviours", self.nesting_level)
+            behaviour_binding = self.scope.lookup(node.behaviour)
             behaviour_funs = []
-            if behaviour:
+            if behaviour_binding:
+                behaviour = behaviour_binding.value
+                assert isinstance(behaviour, Behaviour)
                 if behaviour.interface != node.is_behaviour_interface_method():
                     if behaviour.interface:
                         return self.error(
@@ -657,18 +733,31 @@ class TypeCheck:
                     )
                 behaviour_funs = list(behaviour.funs)
             behaviour_funs.append(shape)
-            self.behaviours[node.behaviour] = Behaviour(
-                node.behaviour, tuple(behaviour_funs), node.is_behaviour_interface_method()
+            self.scope.bind(
+                node.behaviour, Behaviour(node.behaviour, tuple(behaviour_funs), node.is_behaviour_interface_method())
             )
+        return shape
+
+    def tc_fun_def(self, node: ast.FunDef) -> Shape:
+        shape = self.type_env.get(node)
+        if isinstance(shape, ErrorShape):
+            return shape
+        assert isinstance(shape, FunShape)
+        with self.child_scope(node):
+            for param in shape.params:
+                if err := self.scope.bind(param.name, param.shape):
+                    return self.error(err)
+            if node.body:
+                self.visit(node.body, node)
         if node.body is None:
             # This is an interface method.
             return shape
         body_shape = self.type_env.get(node.body)
         if isinstance(body_shape, ErrorShape):
             return body_shape
-        if err := body_shape.not_conforms_to(return_shape):
+        if err := body_shape.not_conforms_to(shape.result):
             return self.error(
-                error.does_not_conform_to(str(body_shape), str(return_shape), node.span, return_shape.span, err)
+                error.does_not_conform_to(str(body_shape), str(shape.result), node.span, shape.result.span, err)
             )
         if err := self.scope.bind(node.name, shape):
             return self.error(err)
@@ -752,6 +841,7 @@ class TypeCheck:
         return self.error(error.no_member(node.name, str(shape), node.target.span, node.span))
 
     def tc_module(self, node: ast.Module) -> Shape:
+        self.forward_declare(node.nodes)
         ast.walk(node, self.visit)
         return Unit
 
@@ -759,23 +849,30 @@ class TypeCheck:
         name = self.scope.lookup(node.name)
         if name is None:
             return self.error(error.undefined_name(node.name, node.span))
-        return name.shape
+        assert isinstance(name.value, Shape)
+        return name.value
 
     def tc_product_shape(self, node: ast.ProductShape) -> Shape:
         ast.walk(node, self.visit)
         fields: list[Field] = []
-        for field in node.fields:
-            shape = self.type_env.get(field.shape)
+        for field_node in node.fields:
+            shape = self.type_env.get(field_node.shape)
             if isinstance(shape, ErrorShape):
                 return shape
-            fields.append(Field(field.name, shape))
+            field = None
+            if isinstance(field_node.shape, ast.ShapeRef):
+                field = Field.with_shape_name(field_node.name, field_node.shape.name, self.scope)
+            else:
+                field = Field.with_shape(field_node.name, shape)
+            fields.append(field)
         behaviours = []
         for behaviour_node in node.behaviours:
-            behaviour = self.behaviours.get(behaviour_node.name)
-            if not behaviour:
+            behaviour_binding = self.scope.lookup(behaviour_node.name)
+            if not behaviour_binding:
                 return self.error(error.undefined_name(behaviour_node.name, behaviour_node.span))
-            behaviours.append(behaviour)
-        return ProductShape(None, tuple(fields), Behaviours(tuple(behaviours)), node.span)
+            assert isinstance(behaviour_binding.value, Behaviour)
+            behaviours.append(behaviour_binding.value.name)
+        return ProductShape(None, tuple(fields), Behaviours(tuple(behaviours), self.scope), node.span)
 
     def tc_shape(self, node: ast.Shape) -> Shape:
         ast.walk(node, self.visit)
@@ -789,13 +886,14 @@ class TypeCheck:
             shape = self.type_env.get(field.value)
             if isinstance(shape, ErrorShape):
                 return shape
-            fields.append(Field(field.name, shape))
+            fields.append(Field.with_shape(field.name, shape))
         behaviours = []
         for behaviour_node in node.behaviours:
-            behaviour = self.behaviours.get(behaviour_node.name)
+            behaviour = self.scope.lookup(behaviour_node.name)
             if not behaviour:
                 return self.error(error.undefined_name(behaviour_node.name, behaviour_node.span))
-            behaviours.append(behaviour)
+            assert isinstance(behaviour.value, Behaviour)
+            behaviours.append(behaviour_node.name)
         for composite_node in node.composites:
             composite = self.type_env.get(composite_node)
             if isinstance(composite, ErrorShape):
@@ -809,7 +907,7 @@ class TypeCheck:
                     fields.append(composite_fields)
                 else:
                     fields[index] = composite_fields
-        shape = ProductShape(None, tuple(fields), Behaviours(tuple(behaviours)), node.span)
+        shape = ProductShape(None, tuple(fields), Behaviours(tuple(behaviours), self.scope), node.span)
         if node.shape_ref:
             shape_ref = self.type_env.get(node.shape_ref)
             if isinstance(shape_ref, ErrorShape):
@@ -832,26 +930,26 @@ class TypeCheck:
         shape = self.type_env.get(node.shape)
         if isinstance(shape, ErrorShape):
             return shape
-        shape = replace(shape, name=node.name)
-        self.scope.bind(node.name, shape)
-        return Unit
+        return replace(shape, name=node.name)
 
     def tc_shape_ref(self, node: ast.ShapeRef) -> Shape:
         declared = self.scope.lookup(node.name)
         if declared is None:
             return self.error(error.undefined_name(node.name, node.span))
-        return declared.shape
+        assert isinstance(declared.value, Shape)
+        return declared.value
 
     def tc_sum_shape(self, node: ast.SumShape) -> Shape:
         ast.walk(node, self.visit)
         variants = [self.type_env.get(variant) for variant in node.variants]
         behaviours = []
         for behaviour_node in node.behaviours:
-            behaviour = self.behaviours.get(behaviour_node.name)
+            behaviour = self.scope.lookup(behaviour_node.name)
             if not behaviour:
                 return self.error(error.undefined_name(behaviour_node.name, behaviour_node.span))
-            behaviours.append(behaviour)
-        return SumShape(None, tuple(variants), Behaviours(tuple(behaviours)), node.span)
+            assert isinstance(behaviour.value, Behaviour)
+            behaviours.append(behaviour_node.name)
+        return SumShape(None, tuple(variants), Behaviours(tuple(behaviours), self.scope), node.span)
 
     def visit(self, node: ast.Node, _parent: ast.Node | None) -> ast.Node:
         shape: Shape
@@ -897,7 +995,8 @@ class TypeCheck:
             case ast.ShapeLitField():
                 shape = self.tc_shape_lit_field(node)
             case ast.ShapeAlias():
-                shape = self.tc_shape_alias(node)
+                # Already handled in `forward_declare`.
+                return node
             case ast.ShapeRef():
                 shape = self.tc_shape_ref(node)
             case ast.StrLit():

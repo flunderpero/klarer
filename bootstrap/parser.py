@@ -388,28 +388,22 @@ class Parser:
                 expr = self.parse_name(t.kind)
             case token.Kind.str_lit:
                 self.input.next()
-                return ast.StrLit(self.id(), t.value_str(), t.span)
+                expr = ast.StrLit(self.id(), t.value_str(), t.span)
             case token.Kind.char_lit:
                 self.input.next()
-                return ast.CharLit(self.id(), t.value_str(), t.span)
+                expr = ast.CharLit(self.id(), t.value_str(), t.span)
             case token.Kind.int_lit:
                 self.input.next()
-                return ast.IntLit(
-                    self.id(),
-                    bits=64,
-                    signed=True,
-                    value=int(t.value_str()),
-                    span=t.span,
-                )
+                expr = ast.IntLit(self.id(), bits=64, signed=True, value=int(t.value_str()), span=t.span)
             case token.Kind.true | token.Kind.false:
                 self.input.next()
-                return ast.BoolLit(self.id(), value=t.kind == token.Kind.true, span=t.span)
+                expr = ast.BoolLit(self.id(), value=t.kind == token.Kind.true, span=t.span)
             case token.Kind.if_:
                 return self.parse_if()
             case token.Kind.type_ident | token.Kind.curly_left:
                 return self.parse_product_shape_lit()
             case token.Kind.bracket_left:
-                return self.parse_list_lit()
+                expr = self.parse_list_lit()
             case _:
                 self.error(error.unexpected_token(t.span, t.kind.value))
                 return None

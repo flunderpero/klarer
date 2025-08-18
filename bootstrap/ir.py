@@ -532,9 +532,6 @@ class FunGen:
         self.block = self.new_block()
 
     def fun_name(self, fun: types.FunShape) -> str:
-        if fun.builtin:
-            assert fun.name is not None
-            return fun.name
         return fun.mangled_name()
 
     def new_block(self) -> Block:
@@ -727,19 +724,19 @@ class FunGen:
                 ast.walk(node, self.generate)
                 src = self.node_regs[node.target.id]
                 types_src = self.type_env.get(node.target)
-                assert isinstance(src.typ, Struct), f"Expected Struct, got {src.typ}"
-                assert isinstance(types_src, types.ProductShape), f"Expected Shape, got {types_src}"
-                field = types_src.field(node.name)
-                if field is not None:
-                    field_index = types_src.fields_sorted.index(field)
-                    assert field_index is not None, f"No member {node.name} in type {types_src}"
-                    getptr_reg = self.reg(Ptr(src.typ.fields[field_index]))
-                    if isinstance(parent, ast.Assign):
-                        self.emit(GetPtr(getptr_reg, src, field_index), node)
-                    else:
-                        self.emit(GetPtr(getptr_reg, src, field_index), None)
-                        reg = self.reg(src.typ.fields[field_index])
-                        self.emit(Load(reg, getptr_reg), node)
+                if isinstance(src.typ, Struct):
+                    assert isinstance(types_src, types.ProductShape), f"Expected Shape, got {types_src}"
+                    field = types_src.field(node.name)
+                    if field is not None:
+                        field_index = types_src.fields_sorted.index(field)
+                        assert field_index is not None, f"No member {node.name} in type {types_src}"
+                        getptr_reg = self.reg(Ptr(src.typ.fields[field_index]))
+                        if isinstance(parent, ast.Assign):
+                            self.emit(GetPtr(getptr_reg, src, field_index), node)
+                        else:
+                            self.emit(GetPtr(getptr_reg, src, field_index), None)
+                            reg = self.reg(src.typ.fields[field_index])
+                            self.emit(Load(reg, getptr_reg), node)
                 # If it's not an field, it has to be a behaviour function.
                 # todo: emit a GetFunPtr if `parent` isn't ast.Call.
             case ast.Call():

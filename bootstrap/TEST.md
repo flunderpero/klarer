@@ -35,6 +35,18 @@ end
 PASS
 ```
 
+**Default behaviours**
+
+```klarer
+main = fun():
+    print("PASS".to_str())
+end
+```
+
+```
+PASS
+```
+
 ### Boolean
 
 ```klarer
@@ -43,6 +55,21 @@ main = fun():
     f = false
     print(bool_to_str(t))
     print(bool_to_str(f))
+end
+```
+
+```
+true
+false
+```
+
+**Default behaviours**
+
+```klarer
+main = fun():
+    b = true
+    print(b.to_str())
+    print(false.to_str())
 end
 ```
 
@@ -85,6 +112,21 @@ end
 ```
 42
 -42
+```
+
+**Default behaviours**
+
+```klarer
+main = fun():
+    i = 42
+    print(i.to_str())
+    print(137.to_str())
+end
+```
+
+```
+42
+137
 ```
 
 **Minimum and maximum values**
@@ -139,6 +181,21 @@ end
 
 ```
 a
+```
+
+**Default behaviours**
+
+```klarer
+main = fun():
+    c = 'P'
+    print(c.to_str())
+    print('A'.to_str())
+end
+```
+
+```
+P
+A
 ```
 
 ### Lists

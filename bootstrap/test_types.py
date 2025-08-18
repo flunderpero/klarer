@@ -5,6 +5,13 @@ import pytest
 from . import ast, types
 from .conftest import shape, typecheck, typecheck_err
 
+root_scope = types.Scope.root()
+Int = root_scope.builtin("Int")
+Bool = root_scope.builtin("Bool")
+Char = root_scope.builtin("Char")
+Str = root_scope.builtin("Str")
+Unit = root_scope.builtin("<unit>")
+
 
 def test_literals() -> None:
     tc = typecheck("""
@@ -13,10 +20,10 @@ def test_literals() -> None:
         'c'
         "hello"
     """)
-    assert tc.at(1, 1, ast.IntLit) == types.Int
-    assert tc.at(2, 1, ast.BoolLit) == types.Bool
-    assert tc.at(3, 1, ast.CharLit) == types.Char
-    assert tc.at(4, 1, ast.StrLit) == types.Str
+    assert tc.at(1, 1, ast.IntLit) == Int
+    assert tc.at(2, 1, ast.BoolLit) == Bool
+    assert tc.at(3, 1, ast.CharLit) == Char
+    assert tc.at(4, 1, ast.StrLit) == Str
 
 
 def test_block() -> None:
@@ -26,7 +33,7 @@ def test_block() -> None:
             42
         end
     """)
-    assert tc.at(1, 1, ast.Block) == types.Int
+    assert tc.at(1, 1, ast.Block) == Int
 
 
 def test_assign() -> None:
@@ -34,8 +41,8 @@ def test_assign() -> None:
         a = 42
         a
     """)
-    assert tc.at(1, 1, ast.Assign) == types.Unit
-    assert tc.at(2, 1, ast.Name) == types.Int
+    assert tc.at(1, 1, ast.Assign) == Unit
+    assert tc.at(2, 1, ast.Name) == Int
 
 
 @pytest.mark.skip
@@ -72,9 +79,9 @@ def test_assign_shape_literal_must_conform() -> None:
 
 def test_fun_basics() -> None:
     tc = typecheck(""" f = fun() Int: 42 end """)
-    assert tc.at(1, 1, ast.FunDef) == shape(types.FunShape, name="f", params=(), result=types.Int)
+    assert tc.at(1, 1, ast.FunDef) == shape(types.FunShape, name="f", params=(), result=Int)
     tc = typecheck(""" main = fun(): end """)
-    assert tc.at(1, 1, ast.FunDef) == shape(types.FunShape, name="main", params=(), result=types.Unit)
+    assert tc.at(1, 1, ast.FunDef) == shape(types.FunShape, name="main", params=(), result=Unit)
 
 
 def test_call_without_params() -> None:
@@ -82,7 +89,7 @@ def test_call_without_params() -> None:
         f = fun() Int: 42 end
         f()
     """)
-    assert tc.at(2, 1, ast.Call) == types.Int
+    assert tc.at(2, 1, ast.Call) == Int
 
 
 def test_call_specialization() -> None:
@@ -92,20 +99,14 @@ def test_call_specialization() -> None:
         f(true)
         f("hello")
     """)
-    assert tc.at(2, 1, ast.Name) == shape(
-        types.FunShape, name="f", params=(types.Param("a", types.Int),), result=types.Int
-    )
-    assert tc.at(2, 1, ast.Call) == types.Int
+    assert tc.at(2, 1, ast.Name) == shape(types.FunShape, name="f", params=(types.Param("a", Int),), result=Int)
+    assert tc.at(2, 1, ast.Call) == Int
 
-    assert tc.at(3, 1, ast.Name) == shape(
-        types.FunShape, name="f", params=(types.Param("a", types.Bool),), result=types.Bool
-    )
-    assert tc.at(3, 1, ast.Call) == types.Bool
+    assert tc.at(3, 1, ast.Name) == shape(types.FunShape, name="f", params=(types.Param("a", Bool),), result=Bool)
+    assert tc.at(3, 1, ast.Call) == Bool
 
-    assert tc.at(4, 1, ast.Name) == shape(
-        types.FunShape, name="f", params=(types.Param("a", types.Str),), result=types.Str
-    )
-    assert tc.at(4, 1, ast.Call) == types.Str
+    assert tc.at(4, 1, ast.Name) == shape(types.FunShape, name="f", params=(types.Param("a", Str),), result=Str)
+    assert tc.at(4, 1, ast.Call) == Str
 
 
 def test_simple_product_shape() -> None:
@@ -114,7 +115,7 @@ def test_simple_product_shape() -> None:
     """)
     assert tc.at(1, 1, ast.ProductShape) == shape(
         types.ProductShape,
-        fields=(types.Field.with_shape("name", types.Str), types.Field.with_shape("age", types.Int)),
+        fields=(types.Field.with_shape("name", Str), types.Field.with_shape("age", Int)),
     )
 
 
@@ -128,13 +129,13 @@ def test_shape_literal_basics() -> None:
     """)
     assert tc.at(1, 1, ast.ProductShape) == shape(
         types.ProductShape,
-        fields=(types.Field.with_shape("name", types.Str), types.Field.with_shape("age", types.Int)),
+        fields=(types.Field.with_shape("name", Str), types.Field.with_shape("age", Int)),
     )
     assert str(tc.at(4, 1, ast.ProductShapeLit)) == str(
         shape(
             types.ProductShape,
             name="Person",
-            fields=(types.Field.with_shape("name", types.Str), types.Field.with_shape("age", types.Int)),
+            fields=(types.Field.with_shape("name", Str), types.Field.with_shape("age", Int)),
         )
     )
 
@@ -165,9 +166,7 @@ def test_shape_literal_can_conform_to_shape_alias() -> None:
         types.ProductShape,
         name="Value",
         fields=(
-            types.Field.with_shape(
-                "value", shape(types.ProductShape, fields=(types.Field.with_shape("name", types.Str),))
-            ),
+            types.Field.with_shape("value", shape(types.ProductShape, fields=(types.Field.with_shape("name", Str),))),
         ),
     )
 
@@ -177,7 +176,7 @@ def test_read_member() -> None:
         foo = {name = "Peter", age = 42}
         foo.name
     """)
-    assert tc.at(2, 1, ast.Member) == types.Str
+    assert tc.at(2, 1, ast.Member) == Str
 
 
 def test_behaviour() -> None:
@@ -196,13 +195,10 @@ def test_behaviour() -> None:
         params=(
             types.Param(
                 "v",
-                shape(
-                    types.ProductShape,
-                    fields=(types.Field.with_shape("value", shape(types.PrimitiveShape, name="Str")),),
-                ),
+                shape(types.ProductShape, fields=(types.Field.with_shape("value", Str),)),
             ),
         ),
-        result=types.Unit,
+        result=Unit,
     )
     assert str(tc.at(6, 1, ast.Member)) == str(
         shape(
@@ -214,12 +210,12 @@ def test_behaviour() -> None:
                     "v",
                     shape(
                         types.ProductShape,
-                        fields=(types.Field.with_shape("value", types.Str),),
+                        fields=(types.Field.with_shape("value", Str),),
                         behaviours=("@Value",),
                     ),
                 ),
             ),
-            result=types.Unit,
+            result=Unit,
         )
     )
 
@@ -239,7 +235,7 @@ def test_polymorphism() -> None:
     assert tc.at(8, 1, ast.Call) == shape(
         types.ProductShape,
         fields=(
-            types.Field.with_shape("a", types.Int),
-            types.Field.with_shape("b", types.Str),
+            types.Field.with_shape("a", Int),
+            types.Field.with_shape("b", Str),
         ),
     )

@@ -317,7 +317,10 @@ class FunShape:
     def mangled_name(self) -> str:
         if self.builtin:
             assert self.name is not None
-            return self.name
+            name = self.name
+            if self.behaviour:
+                name = self.behaviour[1:] + "__" + name
+            return name
         params = [x.mangled_name() for x in [*self.params, self.result]]
         name = ""
         if self.name:
@@ -415,31 +418,78 @@ class Scope:
     @staticmethod
     def root() -> Scope:
         """The root scope with all the builtins."""
+        scope = Scope(None, None, {})
         span = Span("<builtin>", "", 0, 0)
+        bool_shape = PrimitiveShape("Bool", Behaviours(("@Bool",), scope), span)
+        char_shape = PrimitiveShape("Char", Behaviours(("@Char",), scope), span)
+        int_shape = PrimitiveShape("Int", Behaviours(("@Int",), scope), span)
+        str_shape = PrimitiveShape("Str", Behaviours(("@Str",), scope), span)
+        unit_shape = UnitShape(Behaviours((), scope), span)
         binding_defaults = {"builtin": True}
         fun_defaults = {"behaviour": None, "span": span, "builtin": True}
-        scope = Scope(None, None, {})
         scope.bindings["print"] = Binding(
-            FunShape("print", (Param("s", Str),), Unit, **fun_defaults),
+            FunShape("print", (Param("s", str_shape),), unit_shape, **fun_defaults),
             **binding_defaults,
         )
         scope.bindings["int_to_str"] = Binding(
-            FunShape("int_to_str", (Param("i", Int),), Str, **fun_defaults),
+            FunShape("int_to_str", (Param("i", int_shape),), str_shape, **fun_defaults),
             **binding_defaults,
         )
         scope.bindings["char_to_str"] = Binding(
-            FunShape("char_to_str", (Param("c", Char),), Str, **fun_defaults),
+            FunShape("char_to_str", (Param("c", char_shape),), str_shape, **fun_defaults),
             **binding_defaults,
         )
         scope.bindings["bool_to_str"] = Binding(
-            FunShape("bool_to_str", (Param("b", Bool),), Str, **fun_defaults),
+            FunShape("bool_to_str", (Param("b", bool_shape),), str_shape, **fun_defaults),
             **binding_defaults,
         )
-        scope.bindings["Int"] = Binding(Int, **binding_defaults)
-        scope.bindings["Str"] = Binding(Str, **binding_defaults)
-        scope.bindings["Bool"] = Binding(Bool, **binding_defaults)
-        scope.bindings["Char"] = Binding(Char, **binding_defaults)
+
+        # Default behaviours.
+        scope.bindings["@Int"] = Binding(
+            Behaviour(
+                "@Int",
+                (FunShape("to_str", (Param("i", int_shape),), str_shape, behaviour="@Int", builtin=True, span=span),),
+                interface=False,
+            ),
+            **binding_defaults,
+        )
+        scope.bindings["@Bool"] = Binding(
+            Behaviour(
+                "@Bool",
+                (FunShape("to_str", (Param("b", bool_shape),), str_shape, behaviour="@Bool", builtin=True, span=span),),
+                interface=False,
+            ),
+            **binding_defaults,
+        )
+        scope.bindings["@Char"] = Binding(
+            Behaviour(
+                "@Char",
+                (FunShape("to_str", (Param("c", char_shape),), str_shape, behaviour="@Char", builtin=True, span=span),),
+                interface=False,
+            ),
+            **binding_defaults,
+        )
+        scope.bindings["@Str"] = Binding(
+            Behaviour(
+                "@Str",
+                (FunShape("to_str", (Param("s", str_shape),), str_shape, behaviour="@Str", builtin=True, span=span),),
+                interface=False,
+            ),
+            **binding_defaults,
+        )
+
+        scope.bindings["Int"] = Binding(int_shape, **binding_defaults)
+        scope.bindings["Str"] = Binding(str_shape, **binding_defaults)
+        scope.bindings["Bool"] = Binding(bool_shape, **binding_defaults)
+        scope.bindings["Char"] = Binding(char_shape, **binding_defaults)
+        scope.bindings["<unit>"] = Binding(unit_shape, **binding_defaults)
         return scope
+
+    def builtin(self, shape: Literal["Bool", "Char", "Int", "Str", "<unit>"]) -> Shape:
+        binding = self.lookup(shape)
+        assert binding is not None, f"Builtin {shape} not found"
+        assert isinstance(binding.value, Shape), f"Expected Shape, got {binding.value}"
+        return binding.value
 
     def lookup(self, name: str) -> Binding | None:
         if name in self.bindings:
@@ -469,14 +519,6 @@ class Scope:
         return False
 
 
-builtin_span = Span("<builtin", "", 0, 0)
-Bool = PrimitiveShape("Bool", Behaviours((), Scope.empty()), builtin_span)
-Char = PrimitiveShape("Char", Behaviours((), Scope.empty()), builtin_span)
-Int = PrimitiveShape("Int", Behaviours((), Scope.empty()), builtin_span)
-Str = PrimitiveShape("Str", Behaviours((), Scope.empty()), builtin_span)
-Unit = UnitShape(Behaviours((), Scope.empty()), builtin_span)
-
-
 @dataclass
 class FunSpec:
     type_env: TypeEnv
@@ -498,10 +540,21 @@ class TypeCheck:
     fun_defs: dict[FunShape, ast.FunDef]
     nesting_level = 0
 
+    Bool: Shape
+    Char: Shape
+    Int: Shape
+    Str: Shape
+    Unit: Shape
+
     def __init__(self) -> None:
         self.type_env = TypeEnv(None, {})
         self.errors = []
         self.scope = Scope.root()
+        self.Bool = self.scope.builtin("Bool")
+        self.Char = self.scope.builtin("Char")
+        self.Int = self.scope.builtin("Int")
+        self.Str = self.scope.builtin("Str")
+        self.Unit = self.scope.builtin("<unit>")
         self.fun_specs = {}
         self.fun_defs = {}
         for name, fun in (x for x in inspect.getmembers(self, inspect.ismethod) if x[0].startswith("tc_")):
@@ -609,11 +662,11 @@ class TypeCheck:
 
         # Phase 1: Declare the names with basic shapes.
         for node in shape_aliases:
-            shape = FunShape(node.name, (), Unit, None, node.span, builtin=False)
+            shape = FunShape(node.name, (), self.Unit, None, node.span, builtin=False)
             log("typechecker-trace", f"Forward declaring phase 1: {shape}", self.nesting_level)
             self.scope.bind(node.name, shape)
         for node in fun_defs:
-            shape = FunShape(node.name, (), Unit, None, node.span, builtin=False)
+            shape = FunShape(node.name, (), self.Unit, None, node.span, builtin=False)
             log("typechecker-trace", f"Forward declaring phase 1: {shape}", self.nesting_level)
             self.scope.bind(node.name, shape)
             if node.behaviour:
@@ -648,7 +701,7 @@ class TypeCheck:
         log("typechecker-trace", f"Binding {node.target.name} to {value}", self.nesting_level)
         self.scope.bind(node.target.name, value)
         self.type_env.set(node.target, value)
-        return Unit
+        return self.Unit
 
     def tc_field(self, node: ast.Field) -> Shape:
         ast.walk(node, self.visit)
@@ -663,7 +716,7 @@ class TypeCheck:
         return ProductShape(None, (field,), Behaviours((), self.scope), node.span)
 
     def tc_behaviour(self, _node: ast.Behaviour) -> Shape:
-        return Unit
+        return self.Unit
 
     def tc_binary_expr(self, node: ast.BinaryExpr) -> Shape:
         ast.walk(node, self.visit)
@@ -677,13 +730,13 @@ class TypeCheck:
             return self.error(error.does_not_conform_to(str(rhs), str(lhs), rhs.span, lhs.span, err))
         if node.op in (ast.BinaryOp.add, ast.BinaryOp.sub, ast.BinaryOp.mul, ast.BinaryOp.div):
             return lhs
-        return Bool
+        return self.Bool
 
     def tc_block(self, node: ast.Block) -> Shape:
         with self.child_scope(node):
             ast.walk(node, self.visit)
         if len(node.nodes) == 0:
-            return Unit
+            return self.Unit
         return self.type_env.get(node.nodes[-1])
 
     def tc_call(self, node: ast.Call) -> Shape:
@@ -694,17 +747,16 @@ class TypeCheck:
         if not isinstance(callee, FunShape):
             return self.error(error.not_callable(node.callee.span, callee.span))
 
-        # Build a specialized function if it is not a builtin.
-        if callee.builtin:
-            specialized = self.build_specialized(callee, node.args)
-            if err := specialized.not_conforms_to(callee):
-                return self.error(error.does_not_conform_to(str(specialized), str(callee), node.span, callee.span, err))
-            return callee.result
-
         args = node.args
         if callee.behaviour:
             assert isinstance(node.callee, ast.Member), f"Expected Member, got {node.callee}"
             args = [node.callee.target, *args]
+
+        if callee.builtin:
+            specialized = self.build_specialized(callee, args)
+            if err := specialized.not_conforms_to(callee):
+                return self.error(error.does_not_conform_to(str(specialized), str(callee), node.span, callee.span, err))
+            return callee.result
 
         if callee.is_named:
             spec = self.specialize(callee, args, node.span)
@@ -780,7 +832,7 @@ class TypeCheck:
         if node.name == "main":
             log("typechecker-trace", "Adding main to fun_defs", self.nesting_level)
             fun = shape
-            if len(fun.params) != 0 or fun.result != Unit:
+            if len(fun.params) != 0 or fun.result != self.Unit:
                 if isinstance(fun.result, ErrorShape):
                     return ErrorShape(error.cascaded_error(fun.result.error, node.span))
                 return self.error(error.invalid_main(node.span))
@@ -845,7 +897,7 @@ class TypeCheck:
         index_shape = self.type_env.get(node.index)
         if isinstance(index_shape, ErrorShape):
             return index_shape
-        if index_shape != Int:
+        if index_shape != self.Int:
             return self.error(error.unexpected_shape("an integer", str(index_shape), node.index.span))
         return shape.inner
 
@@ -896,7 +948,7 @@ class TypeCheck:
     def tc_module(self, node: ast.Module) -> Shape:
         self.forward_declare(node.nodes)
         ast.walk(node, self.visit)
-        return Unit
+        return self.Unit
 
     def tc_name(self, node: ast.Name) -> Shape:
         name = self.scope.lookup(node.name)
@@ -972,7 +1024,7 @@ class TypeCheck:
 
     def tc_shape_lit_field(self, node: ast.ShapeLitField) -> Shape:
         ast.walk(node, self.visit)
-        return Unit
+        return self.Unit
 
     def tc_shape_alias(self, node: ast.ShapeAlias) -> Shape:
         ast.walk(node, self.visit)
@@ -1014,11 +1066,11 @@ class TypeCheck:
             case ast.Block():
                 shape = self.tc_block(node)
             case ast.BoolLit():
-                shape = Bool
+                shape = self.Bool
             case ast.Call():
                 shape = self.tc_call(node)
             case ast.CharLit():
-                shape = Char
+                shape = self.Char
             case ast.FunDef():
                 shape = self.tc_fun_def(node)
             case ast.Param():
@@ -1030,7 +1082,7 @@ class TypeCheck:
             case ast.IfArm():
                 shape = self.tc_if_arm(node)
             case ast.IntLit():
-                shape = Int
+                shape = self.Int
             case ast.ListShape():
                 shape = self.tc_list_shape(node)
             case ast.ListIndex():
@@ -1055,11 +1107,11 @@ class TypeCheck:
             case ast.ShapeRef():
                 shape = self.tc_shape_ref(node)
             case ast.StrLit():
-                shape = Str
+                shape = self.Str
             case ast.SumShape():
                 shape = self.tc_sum_shape(node)
             case ast.UnitShape():
-                shape = Unit
+                shape = self.Unit
             case _:
                 raise AssertionError(f"Don't know how to type check: {node!r}")
         self.type_env.set(node, shape)

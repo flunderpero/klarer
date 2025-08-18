@@ -661,6 +661,8 @@ class TypeCheck:
             return rhs
         if err := rhs.not_conforms_to(lhs):
             return self.error(error.does_not_conform_to(str(rhs), str(lhs), rhs.span, lhs.span, err))
+        if node.op in (ast.BinaryOp.add, ast.BinaryOp.sub, ast.BinaryOp.mul, ast.BinaryOp.div):
+            return lhs
         return Bool
 
     def tc_block(self, node: ast.Block) -> Shape:

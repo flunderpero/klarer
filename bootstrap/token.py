@@ -37,6 +37,8 @@ class Kind(Enum):
     paren_right = ")"
     pipe = "|"
     plus = "+"
+    slash = "/"
+    star = "*"
     str_lit = "str literal"
     true = "true"
     type_ident = "type identifier"
@@ -132,6 +134,10 @@ def tokenize(input: Input) -> tuple[list[Token], list[error.Error]]:
                 kind = Kind.comma
             case "+":
                 kind = Kind.plus
+            case "*":
+                kind = Kind.star
+            case "/":
+                kind = Kind.slash
             case "<":
                 kind = Kind.lt
             case ">":

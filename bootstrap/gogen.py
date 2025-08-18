@@ -45,6 +45,8 @@ class Code:
 def typ(ir_typ: ir.Typ) -> str:
     match ir_typ:
         case ir.Int():
+            if ir_typ.bits == 1:
+                return "bool"
             return "int"
         case ir.Ptr():
             if isinstance(ir_typ.typ, ir.Struct):
@@ -125,7 +127,11 @@ class FuncGen:
             case ir.GetFunPtr():
                 code.writeln(f"{inst_reg} = {inst.src.fqn}")
             case ir.IntConst():
-                code.writeln(f"{inst_reg} = {inst.value}")
+                assert isinstance(inst.reg.typ, ir.Int)
+                if inst.reg.typ.bits == 1:
+                    code.writeln(f"{inst_reg} = {inst.value} != 0")
+                else:
+                    code.writeln(f"{inst_reg} = {inst.value}")
             case ir.Load():
                 src_reg = self.reg(inst.src)
                 code.writeln(f"{inst_reg} = {src_reg}")
@@ -135,6 +141,34 @@ class FuncGen:
                 getptr = self.getptrs[target_reg]
                 getptr_src_reg = self.reg(getptr.src)
                 code.writeln(f"{getptr_src_reg}._{getptr.field} = {inst.src}")
+            case ir.IAddO():
+                lhs_reg = self.reg(inst.lhs)
+                rhs_reg = self.reg(inst.rhs)
+                code.writeln(f"{inst_reg} = {lhs_reg} + {rhs_reg}")
+            case ir.ISubO():
+                lhs_reg = self.reg(inst.lhs)
+                rhs_reg = self.reg(inst.rhs)
+                code.writeln(f"{inst_reg} = {lhs_reg} - {rhs_reg}")
+            case ir.IMulO():
+                lhs_reg = self.reg(inst.lhs)
+                rhs_reg = self.reg(inst.rhs)
+                code.writeln(f"{inst_reg} = {lhs_reg} * {rhs_reg}")
+            case ir.IDivO():
+                lhs_reg = self.reg(inst.lhs)
+                rhs_reg = self.reg(inst.rhs)
+                code.writeln(f"{inst_reg} = {lhs_reg} / {rhs_reg}")
+            case ir.ICmp():
+                lhs_reg = self.reg(inst.lhs)
+                rhs_reg = self.reg(inst.rhs)
+                op = None
+                match inst.op:
+                    case ir.ICmpOp.eq:
+                        op = "=="
+                    case ir.ICmpOp.ne:
+                        op = "!="
+                    case _:
+                        raise NotImplementedError(f"TODO: ICmp {inst.op.value} {lhs_reg}, {rhs_reg}")
+                code.writeln(f"{inst_reg} = {lhs_reg} {op} {rhs_reg}")
             case ir.Phi():
                 pass
             case _:
@@ -153,7 +187,7 @@ class FuncGen:
                 else:
                     code.writeln(f"return {block.terminator.reg}")
             case ir.Branch():
-                code.writeln(f"if {block.terminator.reg} == 1 {{")
+                code.writeln(f"if {block.terminator.reg} {{")
                 # todo: optimize if we detect a simple if-else chain and are
                 #       sure that this is not a loop. In that case, we can
                 #       just simply create an `if` statement and generate the blocks.

@@ -51,6 +51,24 @@ true
 false
 ```
 
+#### Boolean Expressions
+
+```klarer
+main = fun():
+    print(bool_to_str(1 == 2))
+    print(bool_to_str(1 == 1))
+    print(bool_to_str(2 != 2))
+    print(bool_to_str(1 != 2))
+end
+```
+
+```
+false
+true
+false
+true
+```
+
 ### Int
 
 For now, we only support `Int` which is a 64-bit signed integer.
@@ -83,6 +101,31 @@ end
 ```
 9223372036854775807
 -9223372036854775808
+```
+
+#### Arithmetic Expressions
+
+```klarer
+main = fun():
+    a = 40 + 2
+    print(int_to_str(a))
+
+    b = 140 - 3
+    print(int_to_str(b))
+
+    c = 3 * 4
+    print(int_to_str(c))
+
+    d = 5 / 2
+    print(int_to_str(d))
+end
+```
+
+```
+42
+137
+12
+2
 ```
 
 ### Char

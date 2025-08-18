@@ -14,8 +14,8 @@ func IntToStr(i int) string {
 	return strconv.Itoa(i)
 }
 
-func BoolToStr(i int) string {
-	if i == 1 {
+func BoolToStr(b bool) string {
+	if b {
 		return "true"
 	} else {
 		return "false"

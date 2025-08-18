@@ -260,7 +260,9 @@ class Loop:
 
 class BinaryOp(Enum):
     add = "+"
+    div = "/"
     eq = "=="
+    mul = "*"
     ne = "!="
     sub = "-"
 

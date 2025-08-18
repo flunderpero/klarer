@@ -226,6 +226,36 @@ class ISubO:
         return [self.reg, self.lhs, self.rhs]
 
 
+@dataclass
+class IMulO:
+    """Signed multiplication with overflow."""
+
+    reg: Reg
+    lhs: Reg
+    rhs: Reg
+
+    def __str__(self) -> str:
+        return f"{self.reg} = imulo {self.lhs.typ} {self.lhs}, {self.rhs.typ} {self.rhs}"
+
+    def regs(self) -> list[Reg]:
+        return [self.reg, self.lhs, self.rhs]
+
+
+@dataclass
+class IDivO:
+    """Signed division with overflow."""
+
+    reg: Reg
+    lhs: Reg
+    rhs: Reg
+
+    def __str__(self) -> str:
+        return f"{self.reg} = idivo {self.lhs.typ} {self.lhs}, {self.rhs.typ} {self.rhs}"
+
+    def regs(self) -> list[Reg]:
+        return [self.reg, self.lhs, self.rhs]
+
+
 class ICmpOp(Enum):
     eq = "eq"
     ne = "ne"
@@ -266,7 +296,7 @@ class Phi:
         return [x.reg for x in self.incoming] + [self.reg]
 
 
-Inst = IntConst | GetPtr | GetFunPtr | Load | Store | Call | Alloc | IAddO | ISubO | ICmp | Phi
+Inst = IntConst | GetPtr | GetFunPtr | Load | Store | Call | Alloc | IAddO | ISubO | IMulO | IDivO | ICmp | Phi
 
 BlockId = int
 
@@ -675,6 +705,12 @@ class FunGen:
                     case ast.BinaryOp.sub:
                         reg = self.reg(I64)
                         self.emit(ISubO(reg, lhs_reg, rhs_reg), node)
+                    case ast.BinaryOp.mul:
+                        reg = self.reg(I64)
+                        self.emit(IMulO(reg, lhs_reg, rhs_reg), node)
+                    case ast.BinaryOp.div:
+                        reg = self.reg(I64)
+                        self.emit(IDivO(reg, lhs_reg, rhs_reg), node)
                     case ast.BinaryOp.eq | ast.BinaryOp.ne:
                         match lhs_reg.typ:
                             case Int():

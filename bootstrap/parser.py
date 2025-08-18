@@ -343,6 +343,8 @@ class Parser:
             op_by_token = {
                 token.Kind.plus: ast.BinaryOp.add,
                 token.Kind.minus: ast.BinaryOp.sub,
+                token.Kind.slash: ast.BinaryOp.div,
+                token.Kind.star: ast.BinaryOp.mul,
                 token.Kind.eqeq: ast.BinaryOp.eq,
                 token.Kind.neq: ast.BinaryOp.ne,
             }
@@ -351,6 +353,8 @@ class Parser:
                 ast.BinaryOp.ne: 1,
                 ast.BinaryOp.add: 2,
                 ast.BinaryOp.sub: 2,
+                ast.BinaryOp.mul: 3,
+                ast.BinaryOp.div: 3,
             }
             op = op_by_token.get(t.kind)
             if not op:

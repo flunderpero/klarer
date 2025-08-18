@@ -108,11 +108,32 @@ class ShapeLitField:
 
 
 @dataclass
-class ShapeLit:
+class ListLit:
+    id: NodeId = field(compare=False, hash=False, repr=False)
+    values: list[Expr]
+    span: Span = field(compare=False, hash=False, repr=False)
+
+    def __str__(self) -> str:
+        return nid(self.id) + f"[{self.values}]"
+
+
+@dataclass
+class ListIndex:
+    id: NodeId = field(compare=False, hash=False, repr=False)
+    target: Expr
+    index: Expr
+    span: Span = field(compare=False, hash=False, repr=False)
+
+    def __str__(self) -> str:
+        return nid(self.id) + f"{self.target}[{self.index}]"
+
+
+@dataclass
+class ProductShapeLit:
     id: NodeId = field(compare=False, hash=False, repr=False)
     fields: list[ShapeLitField]
     shape_ref: ShapeRef | None
-    composites: list[ShapeLit]
+    composites: list[ProductShapeLit]
     behaviours: list[Behaviour]
     span: Span = field(compare=False, hash=False, repr=False)
 
@@ -173,6 +194,16 @@ class FunShape:
     def __str__(self) -> str:
         params = ", ".join(str(x) for x in self.params)
         return nid(self.id) + f"fun({params}) -> {self.result}"
+
+
+@dataclass
+class ListShape:
+    id: NodeId = field(compare=False, hash=False, repr=False)
+    inner: Shape
+    span: Span = field(compare=False, hash=False, repr=False)
+
+    def __str__(self) -> str:
+        return nid(self.id) + f"[{self.inner}]"
 
 
 @dataclass
@@ -342,8 +373,22 @@ class Module:
         return nid(self.id) + f"mod {self.fqn}\n" + "\n".join(str(x) for x in self.nodes)
 
 
-Shape = ShapeRef | FunShape | ProductShape | SumShape | UnitShape
-Expr = BinaryExpr | Block | BoolLit | Call | CharLit | If | IntLit | Member | Name | StrLit | ShapeLit
+Shape = ShapeRef | FunShape | ProductShape | SumShape | UnitShape | ListShape
+Expr = (
+    BinaryExpr
+    | Block
+    | BoolLit
+    | Call
+    | CharLit
+    | If
+    | IntLit
+    | Member
+    | Name
+    | StrLit
+    | ProductShapeLit
+    | ListLit
+    | ListIndex
+)
 Node = Expr | Module | Shape | Field | ShapeAlias | ShapeLitField | IfArm | Param | Assign | FunDef | Behaviour | Shape
 
 ASTVisitor = Callable[[Node, Node | None], Node]
@@ -397,7 +442,7 @@ def walk(node: Node, visit_: ASTVisitor) -> bool:
             node.target = cast(Expr, visit(node.target, node))
         case ShapeAlias():
             node.shape = cast(Shape, visit(node.shape, node))
-        case ShapeLit():
+        case ProductShapeLit():
             for i, field in enumerate(node.fields):
                 node.fields[i] = cast(ShapeLitField, visit(field, node))
             if node.shape_ref:
@@ -405,11 +450,19 @@ def walk(node: Node, visit_: ASTVisitor) -> bool:
             for i, behaviour in enumerate(node.behaviours):
                 node.behaviours[i] = cast(Behaviour, visit(behaviour, node))
             for i, composite in enumerate(node.composites):
-                node.composites[i] = cast(ShapeLit, visit(composite, node))
+                node.composites[i] = cast(ProductShapeLit, visit(composite, node))
         case ShapeLitField():
             node.value = cast(Expr, visit(node.value, node))
         case Field():
             node.shape = cast(Shape, visit(node.shape, node))
+        case ListLit():
+            for i, value in enumerate(node.values):
+                node.values[i] = cast(Expr, visit(value, node))
+        case ListIndex():
+            node.target = cast(Expr, visit(node.target, node))
+            node.index = cast(Expr, visit(node.index, node))
+        case ListShape():
+            node.inner = cast(Shape, visit(node.inner, node))
         case ProductShape():
             for i, field in enumerate(node.fields):
                 node.fields[i] = cast(Field, visit(field, node))

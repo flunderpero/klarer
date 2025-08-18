@@ -111,13 +111,13 @@ def test_behaviour_has_to_come_after_composition() -> None:
 
 def test_shape_product_literal_basics() -> None:
     assert parse_first("{a = 42}") == node(
-        ast.ShapeLit, fields=[node(ast.ShapeLitField, name="a", value=node(ast.IntLit, value=42))]
+        ast.ProductShapeLit, fields=[node(ast.ShapeLitField, name="a", value=node(ast.IntLit, value=42))]
     )
 
 
 def test_shape_product_literal_with_shape_ref() -> None:
     assert parse_first("Foo{a = 42}") == node(
-        ast.ShapeLit,
+        ast.ProductShapeLit,
         shape_ref=node(ast.ShapeRef, name="Foo"),
         fields=[node(ast.ShapeLitField, name="a", value=node(ast.IntLit, value=42))],
     )
@@ -125,7 +125,7 @@ def test_shape_product_literal_with_shape_ref() -> None:
 
 def test_shape_literal_with_behaviour() -> None:
     assert parse_first("{a = 42} + @Foo") == node(
-        ast.ShapeLit,
+        ast.ProductShapeLit,
         fields=[node(ast.ShapeLitField, name="a", value=node(ast.IntLit, value=42))],
         behaviours=[node(ast.Behaviour, name="@Foo")],
     )
@@ -133,17 +133,17 @@ def test_shape_literal_with_behaviour() -> None:
 
 def test_composite_product_shape_literal() -> None:
     assert parse_first("{a = {b = 42} + Foo{c = 137} + @Bar}") == node(
-        ast.ShapeLit,
+        ast.ProductShapeLit,
         fields=[
             node(
                 ast.ShapeLitField,
                 name="a",
                 value=node(
-                    ast.ShapeLit,
+                    ast.ProductShapeLit,
                     fields=[node(ast.ShapeLitField, name="b", value=node(ast.IntLit, value=42))],
                     composites=[
                         node(
-                            ast.ShapeLit,
+                            ast.ProductShapeLit,
                             fields=[node(ast.ShapeLitField, name="c", value=node(ast.IntLit, value=137))],
                             shape_ref=node(ast.ShapeRef, name="Foo"),
                         )

@@ -9,8 +9,8 @@ Value = str | None
 
 class Kind(Enum):
     behaviour_ident = "behaviour identifier"
-    braket_left = "["
-    braket_right = "]"
+    bracket_left = "["
+    bracket_right = "]"
     case = "case"
     char_lit = "char literal"
     colon = ":"
@@ -125,9 +125,9 @@ def tokenize(input: Input) -> tuple[list[Token], list[error.Error]]:
             case "}":
                 kind = Kind.curly_right
             case "[":
-                kind = Kind.braket_left
+                kind = Kind.bracket_left
             case "]":
-                kind = Kind.braket_right
+                kind = Kind.bracket_right
             case ".":
                 kind = Kind.dot
             case ",":

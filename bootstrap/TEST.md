@@ -141,6 +141,115 @@ end
 a
 ```
 
+### Lists
+
+```klarer
+
+Strings = {values [Str]}
+
+main = fun():
+    a = Strings{values = ["FAIL", "PASS"]}
+    print(a.values[1])
+end
+```
+
+```
+PASS
+```
+
+**Lists of product shapes**
+
+```klarer
+
+Person = {name Str, age Int}
+
+main = fun():
+    list = [Person{name = "John", age = 42}, Person{name = "Jane", age = 24}]
+    print(list[0].name)
+    print(list[1].name)
+end
+```
+
+```
+John
+Jane
+```
+
+**Lists of Int**
+
+```klarer
+
+main = fun():
+    list = [42, 137]
+    print(int_to_str(list[0]))
+    print(int_to_str(list[1]))
+end
+```
+
+```
+42
+137
+```
+
+**List of mixed shapes**
+
+> [!TODO]
+> We don't support sum shapes yet.
+
+```todo
+
+main = fun():
+    list = []
+    list = list + ["PASS"]
+    -- `list` is `[Str]` here.
+    print(list[0])
+
+    list = list + [42]
+    -- `list` is `[Str | Int]` here, that's why we have to `match`.
+    match list[0]:
+        case Str:
+            print(list[0])
+        case _:
+            print("FAIL")
+    end
+    match list[1]:
+        case Int:
+            print(int_to_str(list[1]))
+        case _:
+            print("FAIL")
+    end
+end
+
+```
+
+```
+PASS
+42
+```
+
+#### List Operations
+
+**Concatenating lists**
+
+```klarer
+main = fun():
+    a = ["P", "A"]
+    b = ["S"]
+    c = a + ["S"] + b
+    print(c[0])
+    print(c[1])
+    print(c[2])
+    print(c[3])
+end
+```
+
+```
+P
+A
+S
+S
+```
+
 ## If Expressions
 
 ```klarer

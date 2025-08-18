@@ -65,10 +65,8 @@ def node(kind: Callable, **kwargs: Any) -> ast.Node:
             defaults.update({"behaviours": []})
         case ast.ProductShape:
             defaults.update({"behaviours": [], "composites": []})
-        case ast.ShapeLit:
+        case ast.ProductShapeLit:
             defaults.update({"shape_ref": None, "behaviours": [], "composites": []})
-        case ast.ShapeLit:
-            defaults.update({"behaviours": []})
         case ast.SumShape:
             defaults.update({"behaviours": []})
     return kind(**defaults | kwargs)

@@ -49,9 +49,9 @@ def typ(ir_typ: ir.Typ) -> str:
                 return "bool"
             return "int"
         case ir.Ptr():
-            if isinstance(ir_typ.typ, ir.Struct):
-                return f"*{typ(ir_typ.typ)}"
-            return typ(ir_typ.typ)
+            # todo: unify the handling of struct pointers
+            ref = "*" if isinstance(ir_typ.typ, ir.Struct) else ""
+            return f"{ref}{typ(ir_typ.typ)}"
         case ir.Str():
             return "string"
         case ir.Struct():
@@ -62,6 +62,10 @@ def typ(ir_typ: ir.Typ) -> str:
             code = Code(0, [])
             emit_fun_signature("", [ir.Reg(f"p{i}", x) for i, x in enumerate(ir_typ.params)], ir_typ.result, code)
             return str(code)
+        case ir.List():
+            # todo: unify the handling of struct pointers
+            ref = "*" if isinstance(ir_typ.typ, ir.Struct) else ""
+            return f"[]{ref}{typ(ir_typ.typ)}"
         case _:
             raise NotImplementedError(f"Unsupported type: {ir_typ}")
 
@@ -132,6 +136,24 @@ class FuncGen:
                     code.writeln(f"{inst_reg} = {inst.value} != 0")
                 else:
                     code.writeln(f"{inst_reg} = {inst.value}")
+            case ir.ListConst():
+                assert isinstance(inst.reg.typ, ir.List)
+                # todo: unify the handling of struct pointers
+                ref = "*" if isinstance(inst.reg.typ.typ, ir.Struct) else ""
+                code.write(f"{inst_reg} = []{ref}{typ(inst.reg.typ.typ)}{{")
+                for i, value_reg in enumerate(inst.values):
+                    if i > 0:
+                        code.write(", ")
+                    code.write(f"{self.reg(value_reg)}")
+                code.writeln("}")
+            case ir.ListConcat():
+                lhs_reg = self.reg(inst.lhs)
+                rhs_reg = self.reg(inst.rhs)
+                code.writeln(f"{inst_reg} = append({lhs_reg}, {rhs_reg}...)")
+            case ir.GetListPtr():
+                src_reg = self.reg(inst.src)
+                index_reg = self.reg(inst.index)
+                code.writeln(f"{inst_reg} = {src_reg}[{index_reg}]")
             case ir.Load():
                 src_reg = self.reg(inst.src)
                 code.writeln(f"{inst_reg} = {src_reg}")

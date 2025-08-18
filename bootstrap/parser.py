@@ -161,6 +161,14 @@ class Parser:
         match t.kind:
             case token.Kind.curly_left:
                 shape = self.parse_product_shape()
+            case token.Kind.bracket_left:
+                self.input.next()
+                inner = self.parse_shape()
+                if not isinstance(inner, ast.Shape):
+                    return None
+                shape = ast.ListShape(self.id(), inner, self.input.span_merge(t.span))
+                if not self.expect(token.Kind.bracket_right):
+                    return None
             case token.Kind.fun:
                 shape = self.parse_fun_shape()
             case token.Kind.type_ident:
@@ -399,7 +407,9 @@ class Parser:
             case token.Kind.if_:
                 return self.parse_if()
             case token.Kind.type_ident | token.Kind.curly_left:
-                return self.parse_shape_lit()
+                return self.parse_product_shape_lit()
+            case token.Kind.bracket_left:
+                return self.parse_list_lit()
             case _:
                 self.error(error.unexpected_token(t.span, t.kind.value))
                 return None
@@ -411,6 +421,8 @@ class Parser:
                     expr = self.parse_call(expr)
                 case token.Kind.dot:
                     expr = self.parse_member(expr)
+                case token.Kind.bracket_left:
+                    expr = self.parse_list_index(expr)
                 case _:
                     break
         return expr
@@ -424,19 +436,50 @@ class Parser:
             return None
         return ast.Member(self.id(), target, name, self.input.span_merge(span))
 
-    def parse_shape_lit(self) -> ast.ShapeLit | None:
-        t = self.input.peek()
-        match t.kind:
-            case token.Kind.curly_left | token.Kind.type_ident:
-                return self.parse_product_shape_lit()
-            case _:
-                self.error(error.unexpected_token(t.span, t.kind.name, t.kind.curly_left.name, t.kind.type_ident.name))
-                return None
+    def parse_list_index(self, target: ast.Expr) -> ast.ListIndex | None:
+        span = self.input.span()
+        if not self.expect(token.Kind.bracket_left):
+            return None
+        index = self.parse_expr()
+        if not index:
+            return None
+        if not self.expect(token.Kind.bracket_right):
+            return None
+        return ast.ListIndex(self.id(), target, index, self.input.span_merge(span))
 
-    def parse_product_shape_lit(self) -> ast.ShapeLit | None:
+    def parse_list_lit(self) -> ast.ListLit | None:
+        span = self.input.span()
+        if not self.expect(token.Kind.bracket_left):
+            return None
+        values: list[ast.Expr] = []
+        while self.input.peek().kind != token.Kind.bracket_right:
+            value = self.parse_expr()
+            if not value:
+                return None
+            values.append(value)
+            match self.input.peek().kind:
+                case token.Kind.comma:
+                    self.input.next()
+                case token.Kind.bracket_right:
+                    break
+                case _:
+                    self.error(
+                        error.unexpected_token(
+                            self.input.span(),
+                            self.input.peek().kind.value,
+                            token.Kind.comma.value,
+                            token.Kind.bracket_right.value,
+                        )
+                    )
+                    return None
+        if not self.expect(token.Kind.bracket_right):
+            return None
+        return ast.ListLit(self.id(), values, self.input.span_merge(span))
+
+    def parse_product_shape_lit(self) -> ast.ProductShapeLit | None:
         span = self.input.span()
 
-        def parse_lit() -> ast.ShapeLit | None:
+        def parse_lit() -> ast.ProductShapeLit | None:
             shape_ref: ast.ShapeRef | None = None
             if self.input.peek().kind == token.Kind.type_ident:
                 t = self.input.next()
@@ -459,11 +502,11 @@ class Parser:
                     self.input.next()
             if not self.expect(token.Kind.curly_right):
                 return None
-            return ast.ShapeLit(self.id(), fields, shape_ref, [], [], self.input.span_merge(span))
+            return ast.ProductShapeLit(self.id(), fields, shape_ref, [], [], self.input.span_merge(span))
 
         shape = parse_lit()
-        assert isinstance(shape, ast.ShapeLit)
-        composites: list[ast.ShapeLit] = []
+        assert isinstance(shape, ast.ProductShapeLit)
+        composites: list[ast.ProductShapeLit] = []
         while self.input.peek().kind == token.Kind.plus and self.input.peek1().kind != token.Kind.behaviour_ident:
             self.input.next()
             composite = parse_lit()
@@ -540,9 +583,11 @@ class Parser:
             case token.Kind.type_ident:
                 match self.input.peek1().kind:
                     case token.Kind.curly_left:
-                        return self.parse_shape_lit()
+                        return self.parse_product_shape_lit()
                     case _:
                         return self.parse_shape_alias()
+            case token.Kind.bracket_left:
+                return self.parse_list_lit()
             case token.Kind.behaviour_ident:
                 return self.parse_behaviour_fun_def()
             case token.Kind.ident:

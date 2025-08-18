@@ -130,7 +130,7 @@ def test_shape_literal_basics() -> None:
         types.ProductShape,
         fields=(types.Field.with_shape("name", types.Str), types.Field.with_shape("age", types.Int)),
     )
-    assert str(tc.at(4, 1, ast.ShapeLit)) == str(
+    assert str(tc.at(4, 1, ast.ProductShapeLit)) == str(
         shape(
             types.ProductShape,
             name="Person",

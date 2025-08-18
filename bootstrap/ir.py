@@ -49,6 +49,14 @@ class Fun:
 
 
 @dataclass
+class List:
+    typ: Typ
+
+    def __str__(self) -> str:
+        return f"[{self.typ}]"
+
+
+@dataclass
 class Ptr:
     typ: Typ
 
@@ -62,7 +70,7 @@ class NoneTyp:
         return "none"
 
 
-Typ = Int | Struct | Fun | Ptr | Str | NoneTyp
+Typ = Int | Struct | Fun | Ptr | Str | NoneTyp | List
 
 
 I1 = Int(bits=1, signed=True)
@@ -107,6 +115,44 @@ class IntConst:
 
     def regs(self) -> list[Reg]:
         return [self.reg]
+
+
+@dataclass
+class ListConst:
+    reg: Reg
+    values: list[Reg]
+
+    def __str__(self) -> str:
+        return f"{self.reg.id} = {self.values}"
+
+    def regs(self) -> list[Reg]:
+        return [self.reg, *self.values]
+
+
+@dataclass
+class ListConcat:
+    reg: Reg
+    lhs: Reg
+    rhs: Reg
+
+    def __str__(self) -> str:
+        return f"{self.reg} = concat {self.lhs.typ} {self.lhs}, {self.rhs.typ} {self.rhs}"
+
+    def regs(self) -> list[Reg]:
+        return [self.reg, self.lhs, self.rhs]
+
+
+@dataclass
+class GetListPtr:
+    reg: Reg
+    src: Reg
+    index: Reg
+
+    def __str__(self) -> str:
+        return f"{self.reg} = getlistptr {self.src.typ} {self.src}, {self.index.typ} {self.index}"
+
+    def regs(self) -> list[Reg]:
+        return [self.reg, self.src, self.index]
 
 
 @dataclass
@@ -296,7 +342,24 @@ class Phi:
         return [x.reg for x in self.incoming] + [self.reg]
 
 
-Inst = IntConst | GetPtr | GetFunPtr | Load | Store | Call | Alloc | IAddO | ISubO | IMulO | IDivO | ICmp | Phi
+Inst = (
+    IntConst
+    | ListConst
+    | ListConcat
+    | GetPtr
+    | GetListPtr
+    | GetFunPtr
+    | Load
+    | Store
+    | Call
+    | Alloc
+    | IAddO
+    | ISubO
+    | IMulO
+    | IDivO
+    | ICmp
+    | Phi
+)
 
 BlockId = int
 
@@ -503,6 +566,8 @@ class FunGen:
                         raise AssertionError(f"Unsupported primitive type: {shape.name}")
             case types.UnitShape():
                 return NoneTyp()
+            case types.ListShape():
+                return List(self.typ(shape.inner))
             case types.ProductShape():
                 name = shape.mangled_name()
                 if existing := self.ir.structs.get(name):
@@ -612,7 +677,23 @@ class FunGen:
             case ast.BoolLit():
                 reg = self.reg(I1)
                 self.emit(IntConst(reg, value=int(node.value)), node)
-            case ast.ShapeLit():
+            case ast.ListLit():
+                ast.walk(node, self.generate)
+                values = [self.node_regs[x.id] for x in node.values]
+                typ = self.typ(self.type_env.get(node))
+                reg = self.reg(typ)
+                self.emit(ListConst(reg, values), node)
+            case ast.ListIndex():
+                ast.walk(node, self.generate)
+                src = self.node_regs[node.target.id]
+                typ = self.typ(self.type_env.get(node.target))
+                assert isinstance(src.typ, List), f"Expected List, got {src.typ}"
+                index = self.node_regs[node.index.id]
+                getptr_reg = self.reg(Ptr(src.typ.typ))
+                self.emit(GetListPtr(getptr_reg, src, index), None)
+                reg = self.reg(src.typ.typ)
+                self.emit(Load(reg, getptr_reg), node)
+            case ast.ProductShapeLit():
                 ast.walk(node, self.generate)
                 # We need to sort the fields by name because we did so in `typ()` when
                 # construction the struct type.
@@ -700,8 +781,12 @@ class FunGen:
                 rhs_reg = self.node_regs[node.rhs.id]
                 match node.op:
                     case ast.BinaryOp.add:
-                        reg = self.reg(I64)
-                        self.emit(IAddO(reg, lhs_reg, rhs_reg), node)
+                        if isinstance(lhs_reg.typ, List):
+                            reg = self.reg(List(lhs_reg.typ.typ))
+                            self.emit(ListConcat(reg, lhs_reg, rhs_reg), node)
+                        else:
+                            reg = self.reg(I64)
+                            self.emit(IAddO(reg, lhs_reg, rhs_reg), node)
                     case ast.BinaryOp.sub:
                         reg = self.reg(I64)
                         self.emit(ISubO(reg, lhs_reg, rhs_reg), node)

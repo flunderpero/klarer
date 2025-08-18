@@ -163,6 +163,24 @@ def sorted_tuple(a: tuple[Any, ...]) -> tuple[Any, ...]:
 
 
 @dataclass(eq=True, frozen=True)
+class ListShape:
+    inner: Shape
+    behaviours: Behaviours
+    span: Span = field(compare=False, hash=False, repr=False)
+
+    def __str__(self) -> str:
+        return f"[{self.inner}]"
+
+    def mangled_name(self) -> str:
+        return f"List_of_{self.inner.mangled_name()}"
+
+    def not_conforms_to(self, other: Shape) -> error.Error | None:
+        if not isinstance(other, ListShape):
+            return error.unexpected_shape("a list", str(other), other.span)
+        return self.inner.not_conforms_to(other.inner)
+
+
+@dataclass(eq=True, frozen=True)
 class ProductShape:
     name: str | None
     fields: tuple[Field, ...]
@@ -350,7 +368,7 @@ class ErrorShape:
         return self.error
 
 
-Shape = PrimitiveShape | ProductShape | SumShape | FunShape | UnitShape | ErrorShape
+Shape = PrimitiveShape | ProductShape | SumShape | FunShape | UnitShape | ErrorShape | ListShape
 
 
 @dataclass
@@ -817,6 +835,43 @@ class TypeCheck:
         ast.walk(node, self.visit)
         return self.tc_block(node.block)
 
+    def tc_list_index(self, node: ast.ListIndex) -> Shape:
+        ast.walk(node, self.visit)
+        shape = self.type_env.get(node.target)
+        if isinstance(shape, ErrorShape):
+            return shape
+        if not isinstance(shape, ListShape):
+            return self.error(error.unexpected_shape("a list", str(shape), node.target.span))
+        index_shape = self.type_env.get(node.index)
+        if isinstance(index_shape, ErrorShape):
+            return index_shape
+        if index_shape != Int:
+            return self.error(error.unexpected_shape("an integer", str(index_shape), node.index.span))
+        return shape.inner
+
+    def tc_list_lit(self, node: ast.ListLit) -> Shape:
+        ast.walk(node, self.visit)
+        shape = None
+        for value_node in node.values:
+            value_shape = self.type_env.get(value_node)
+            if isinstance(value_shape, ErrorShape):
+                return value_shape
+            if shape is None:
+                shape = value_shape
+            elif shape != value_shape:
+                # todo: for now, all values in a list must have the same type.
+                return self.error(error.is_not_same(str(shape), str(value_shape), value_node.span))
+        if shape is None:
+            shape = ProductShape.empty(node.span)
+        return ListShape(shape, Behaviours((), self.scope), node.span)
+
+    def tc_list_shape(self, node: ast.ListShape) -> Shape:
+        ast.walk(node, self.visit)
+        shape = self.type_env.get(node.inner)
+        if isinstance(shape, ErrorShape):
+            return shape
+        return ListShape(shape, Behaviours((), self.scope), node.span)
+
     def tc_member(self, node: ast.Member) -> Shape:
         ast.walk(node, self.visit)
         shape = self.type_env.get(node.target)
@@ -872,11 +927,7 @@ class TypeCheck:
             behaviours.append(behaviour_binding.value.name)
         return ProductShape(None, tuple(fields), Behaviours(tuple(behaviours), self.scope), node.span)
 
-    def tc_shape(self, node: ast.Shape) -> Shape:
-        ast.walk(node, self.visit)
-        raise NotImplementedError
-
-    def tc_shape_lit(self, node: ast.ShapeLit) -> Shape:
+    def tc_product_shape_lit(self, node: ast.ProductShapeLit) -> Shape:
         ast.walk(node, self.visit)
         fields = []
         for field in node.fields:
@@ -980,6 +1031,12 @@ class TypeCheck:
                 shape = self.tc_if_arm(node)
             case ast.IntLit():
                 shape = Int
+            case ast.ListShape():
+                shape = self.tc_list_shape(node)
+            case ast.ListIndex():
+                shape = self.tc_list_index(node)
+            case ast.ListLit():
+                shape = self.tc_list_lit(node)
             case ast.Member():
                 shape = self.tc_member(node)
             case ast.Module():
@@ -988,8 +1045,8 @@ class TypeCheck:
                 shape = self.tc_name(node)
             case ast.ProductShape():
                 shape = self.tc_product_shape(node)
-            case ast.ShapeLit():
-                shape = self.tc_shape_lit(node)
+            case ast.ProductShapeLit():
+                shape = self.tc_product_shape_lit(node)
             case ast.ShapeLitField():
                 shape = self.tc_shape_lit_field(node)
             case ast.ShapeAlias():

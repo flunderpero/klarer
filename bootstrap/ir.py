@@ -124,8 +124,8 @@ class IntConst:
     def __str__(self) -> str:
         return f"{self.reg.id} = {self.value}"
 
-    def regs(self) -> list[Reg]:
-        return [self.reg]
+    def args(self) -> list[Reg]:
+        return []
 
 
 @dataclass
@@ -136,8 +136,8 @@ class CharConst:
     def __str__(self) -> str:
         return f"{self.reg.id} = {self.value}"
 
-    def regs(self) -> list[Reg]:
-        return [self.reg]
+    def args(self) -> list[Reg]:
+        return []
 
 
 @dataclass
@@ -148,8 +148,8 @@ class ListConst:
     def __str__(self) -> str:
         return f"{self.reg.id} = {self.values}"
 
-    def regs(self) -> list[Reg]:
-        return [self.reg, *self.values]
+    def args(self) -> list[Reg]:
+        return self.values
 
 
 @dataclass
@@ -161,8 +161,8 @@ class ListConcat:
     def __str__(self) -> str:
         return f"{self.reg} = concat {self.lhs.typ} {self.lhs}, {self.rhs.typ} {self.rhs}"
 
-    def regs(self) -> list[Reg]:
-        return [self.reg, self.lhs, self.rhs]
+    def args(self) -> list[Reg]:
+        return [self.lhs, self.rhs]
 
 
 @dataclass
@@ -174,8 +174,8 @@ class GetListPtr:
     def __str__(self) -> str:
         return f"{self.reg} = getlistptr {self.src.typ} {self.src}, {self.index.typ} {self.index}"
 
-    def regs(self) -> list[Reg]:
-        return [self.reg, self.src, self.index]
+    def args(self) -> list[Reg]:
+        return [self.src, self.index]
 
 
 @dataclass
@@ -187,8 +187,8 @@ class GetPtr:
     def __str__(self) -> str:
         return f"{self.reg} = getptr {self.src.typ} {self.src}, {self.reg.typ}, {self.field}"
 
-    def regs(self) -> list[Reg]:
-        return [self.reg, self.src]
+    def args(self) -> list[Reg]:
+        return [self.src]
 
 
 @dataclass
@@ -199,8 +199,8 @@ class GetFunPtr:
     def __str__(self) -> str:
         return f"{self.reg} = getfnptr {self.src.fqn}, {self.reg.typ}"
 
-    def regs(self) -> list[Reg]:
-        return [self.reg]
+    def args(self) -> list[Reg]:
+        return []
 
 
 @dataclass
@@ -211,8 +211,8 @@ class Load:
     def __str__(self) -> str:
         return f"{self.reg} = load {self.src.typ} {self.src}"
 
-    def regs(self) -> list[Reg]:
-        return [self.reg, self.src]
+    def args(self) -> list[Reg]:
+        return [self.src]
 
 
 @dataclass
@@ -228,7 +228,7 @@ class Store:
         """A store instruction does not create a new register."""
         return NoneReg
 
-    def regs(self) -> list[Reg]:
+    def args(self) -> list[Reg]:
         return [self.target, self.src]
 
 
@@ -236,33 +236,32 @@ class Store:
 class Call:
     reg: Reg
     callee: str | Reg
-    args: list[Reg]
+    args_: list[Reg]
 
     def __str__(self) -> str:
         prefix = f"{self.reg} = call {self.reg.typ}" if self.reg != NoneReg else "call none"
         s = f"{prefix} {self.callee}"
         if self.args:
-            s += f", {', '.join(f'{x.typ} {x.id}' for x in self.args)}"
+            s += f", {', '.join(f'{x.typ} {x.id}' for x in self.args_)}"
         return s
 
-    def regs(self) -> list[Reg]:
-        regs = list(self.args)
-        regs.append(self.reg)
+    def args(self) -> list[Reg]:
+        args = list(self.args_)
         if isinstance(self.callee, Reg):
-            regs.append(self.callee)
-        return regs
+            args.append(self.callee)
+        return args
 
 
 @dataclass
 class Alloc:
     reg: Reg
-    args: list[Reg]
+    args_: list[Reg]
 
     def __str__(self) -> str:
-        return f"{self.reg.id} = alloc {self.reg.typ}, {', '.join(f'{x.typ} {x.id}' for x in self.args)}"
+        return f"{self.reg.id} = alloc {self.reg.typ}, {', '.join(f'{x.typ} {x.id}' for x in self.args_)}"
 
-    def regs(self) -> list[Reg]:
-        return [self.reg, *self.args]
+    def args(self) -> list[Reg]:
+        return self.args_
 
 
 @dataclass
@@ -276,8 +275,8 @@ class IAddO:
     def __str__(self) -> str:
         return f"{self.reg} = iaddo {self.lhs.typ} {self.lhs}, {self.rhs.typ} {self.rhs}"
 
-    def regs(self) -> list[Reg]:
-        return [self.reg, self.lhs, self.rhs]
+    def args(self) -> list[Reg]:
+        return [self.lhs, self.rhs]
 
 
 @dataclass
@@ -291,8 +290,8 @@ class ISubO:
     def __str__(self) -> str:
         return f"{self.reg} = isubo {self.lhs.typ} {self.lhs}, {self.rhs.typ} {self.rhs}"
 
-    def regs(self) -> list[Reg]:
-        return [self.reg, self.lhs, self.rhs]
+    def args(self) -> list[Reg]:
+        return [self.lhs, self.rhs]
 
 
 @dataclass
@@ -306,8 +305,8 @@ class IMulO:
     def __str__(self) -> str:
         return f"{self.reg} = imulo {self.lhs.typ} {self.lhs}, {self.rhs.typ} {self.rhs}"
 
-    def regs(self) -> list[Reg]:
-        return [self.reg, self.lhs, self.rhs]
+    def args(self) -> list[Reg]:
+        return [self.lhs, self.rhs]
 
 
 @dataclass
@@ -321,8 +320,8 @@ class IDivO:
     def __str__(self) -> str:
         return f"{self.reg} = idivo {self.lhs.typ} {self.lhs}, {self.rhs.typ} {self.rhs}"
 
-    def regs(self) -> list[Reg]:
-        return [self.reg, self.lhs, self.rhs]
+    def args(self) -> list[Reg]:
+        return [self.lhs, self.rhs]
 
 
 class ICmpOp(Enum):
@@ -340,8 +339,8 @@ class ICmp:
     def __str__(self) -> str:
         return f"{self.reg} = icmp {self.op.value} {self.lhs.typ} {self.lhs}, {self.rhs.typ} {self.rhs}"
 
-    def regs(self) -> list[Reg]:
-        return [self.reg, self.lhs, self.rhs]
+    def args(self) -> list[Reg]:
+        return [self.lhs, self.rhs]
 
 
 @dataclass
@@ -361,8 +360,8 @@ class Phi:
     def __str__(self) -> str:
         return f"{self.reg} = phi {', '.join(str(reg) for reg in self.incoming)}"
 
-    def regs(self) -> list[Reg]:
-        return [x.reg for x in self.incoming] + [self.reg]
+    def args(self) -> list[Reg]:
+        return [x.reg for x in self.incoming]
 
 
 Inst = (
@@ -413,7 +412,7 @@ class Branch:
     def successors(self) -> list[Block]:
         return [self.then_block, self.else_block]
 
-    def regs(self) -> list[Reg]:
+    def args(self) -> list[Reg]:
         return [self.reg]
 
 
@@ -427,7 +426,7 @@ class Jump:
     def successors(self) -> list[Block]:
         return [self.target]
 
-    def regs(self) -> list[Reg]:
+    def args(self) -> list[Reg]:
         return []
 
 
@@ -441,7 +440,7 @@ class Return:
     def successors(self) -> list[Block]:
         return []
 
-    def regs(self) -> list[Reg]:
+    def args(self) -> list[Reg]:
         return [self.reg]
 
 
@@ -738,32 +737,44 @@ class FunGen:
                 if reg:
                     self.node_regs[node.id] = reg
                     return node
-                # If this node is the callee of a call node then we don't want
-                # to emit a GetFunPtr for named functions.
-                if isinstance(parent, ast.Call) and parent.callee == node:
+                shape = self.type_env.get(node)
+                if not isinstance(shape, types.FunShape):
                     return node
-                ir_typ = self.type_env.get(node)
-                if not isinstance(ir_typ, types.FunShape) or not ir_typ.is_named:
+                # If this node is the callee of a call node then we don't want
+                # to emit a GetFunPtr.
+                if isinstance(parent, ast.Call) and parent.callee == node:
+                    assert shape.is_named, f"Expected named function, got {shape}"
+                    return node
+                if not shape.is_named:
                     return node
                 # Emit a GetFunPtr if the identifier refers to a named function.
-                getptr_reg = self.reg(Ptr(self.typ(ir_typ)))
-                fun_typ = self.typ(ir_typ)
+                getptr_reg = self.reg(Ptr(self.typ(shape)))
+                fun_typ = self.typ(shape)
                 assert isinstance(fun_typ, Fun), f"Expected Fun, got {fun_typ}"
                 self.emit(GetFunPtr(getptr_reg, fun_typ), None)
                 self.node_regs[node.id] = getptr_reg
             case ast.Member():
                 ast.walk(node, self.generate)
                 src = self.node_regs[node.target.id]
-                types_src = self.type_env.get(node.target)
+                src_shape = self.type_env.get(node.target)
                 if isinstance(src.typ, Struct):
-                    assert isinstance(types_src, types.ProductShape), f"Expected Shape, got {types_src}"
-                    field = types_src.field(node.name)
+                    assert isinstance(src_shape, types.ProductShape), f"Expected Shape, got {src_shape}"
+                    field = src_shape.field(node.name)
                     if field is not None:
-                        field_index = types_src.fields_sorted.index(field)
-                        assert field_index is not None, f"No member {node.name} in type {types_src}"
+                        field_index = src_shape.fields_sorted.index(field)
+                        assert field_index is not None, f"No member {node.name} in type {src_shape}"
                         getptr_reg = self.reg(Ptr(src.typ.fields[field_index]))
                         if isinstance(parent, ast.Assign):
                             self.emit(GetPtr(getptr_reg, src, field_index), node)
+                        elif (
+                            isinstance(parent, ast.Call)
+                            and parent.callee == node
+                            and isinstance(field.shape, types.FunShape)
+                            and field.shape.is_named
+                        ):
+                            # We don't emit a GetPtr and Load if the parent is a call
+                            # and the function is named.
+                            pass
                         else:
                             self.emit(GetPtr(getptr_reg, src, field_index), None)
                             reg = self.reg(src.typ.fields[field_index])
@@ -781,7 +792,8 @@ class FunGen:
                     assert isinstance(node.callee, ast.Member), f"Expected Member, got {node.callee}"
                     receiver = self.node_regs[node.callee.target.id]
                     args = [receiver, *args]
-                if fun.is_named:
+                src = self.node_regs.get(node.callee.id)
+                if fun.builtin or not src or isinstance(src.typ, Ptr):
                     # Direct call by name.
                     reg = self.reg(self.typ(fun.result))
                     self.emit(Call(reg, self.fun_name(fun), args), node)
@@ -839,6 +851,7 @@ class FunGen:
                 | ast.Param()
                 | ast.UnitShape()
                 | ast.Behaviour()
+                | ast.FunShape()
                 | ast.ProductShape()
                 | ast.ProductShapeLit()  # ProductShapeLit is always wrapped in a CompoundShapeLit.
                 | ast.CompoundShape()

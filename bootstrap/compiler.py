@@ -12,6 +12,7 @@ from . import (
     error,
     gogen,
     ir,
+    ir_optimize,
     parser,
     token,
     types,
@@ -152,6 +153,7 @@ def compile(input: token.Input, outfile: str) -> Generator[CompilationStep]:  # 
         return
     start = time()
     ir_ = ir.generate_ir(tc_result.fun_specs)
+    ir_ = ir_optimize.remove_unused(ir_)
     yield IRStep(ir_, time() - start)
     start = time()
     code = gogen.gogen(ir_)

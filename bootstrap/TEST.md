@@ -386,7 +386,7 @@ end
 main = fun():
     print(assert_shape(137))
     print(assert_shape({value = "PASS"}).value)
-    -- todo print(assert_shape(the_answer)("Life, the universe, and everything"))
+    print(assert_shape(the_answer)("Life, the universe, and everything"))
 end
 
 ```
@@ -394,6 +394,7 @@ end
 ```
 137
 PASS
+42
 ```
 
 **Compound shapes that are part of a sum shape cannot be created with the sum shape name**
@@ -567,6 +568,134 @@ end
 PASS1
 PASS2
 PASS1
+```
+
+## Functions
+
+**A function can be passed to another function**
+
+> [!TODO]
+> We need to specialize `print_me(v {}, f fun(v {}) {})` to `print_me__id(v Str)`
+> and replace `f` with `id`.
+
+```todo
+
+print_me = fun(v {}, f fun(v {}) {}):
+    print(f(v))
+end
+
+id = fun(v {}) {}: v end
+
+main = fun():
+    print_me("PASS", id)
+end
+
+```
+
+```
+PASS
+```
+
+**A function can be returned from a block**
+
+```klarer
+
+the_answer = fun(s Str) Int:
+    42
+end
+
+six_times_nine = fun(s Str) Int:
+    54 -- This is actually incorrect, but we need a different number for the test. :)
+end
+
+main = fun():
+    f = if case true:
+        the_answer
+    else:
+        six_times_nine
+    end
+    print(f("What is it?"))
+
+    -- Now choose the else branch.
+    f = if case false:
+        the_answer
+    else:
+        six_times_nine
+    end
+    print(f("What is it?"))
+end
+
+```
+
+```
+42
+54
+```
+
+**A function can be stored in a product shape**
+
+```klarer
+
+the_answer = fun(s Str) Int:
+    42
+end
+
+main = fun():
+    shape = {f = the_answer}
+    print(shape.f("Life, the universe, and everything"))
+
+    f = shape.f
+    print(f("Life, the universe, and everything"))
+end
+
+```
+
+```
+42
+42
+```
+
+```klarer
+
+Shape = {f fun(s Str) Int}
+
+the_answer = fun(s Str) Int:
+    42
+end
+
+main = fun():
+    shape = Shape{f = the_answer}
+    print(shape.f("Life, the universe, and everything"))
+end
+
+```
+
+```
+42
+```
+
+**A function can be stored in a list shape**
+
+```klarer
+
+the_answer = fun(s Str) Int:
+    42
+end
+
+six_times_nine = fun(s Str) Int:
+    54 -- This is actually incorrect, but we need a different number for the test. :)
+end
+
+main = fun():
+    shape = [the_answer, six_times_nine]
+    print(shape[0]("Life, the universe, and everything"))
+    print(shape[1]("What is six times nine?"))
+end
+```
+
+```
+42
+54
 ```
 
 ## Behaviour
@@ -852,6 +981,59 @@ end
 main = fun():
     v = bar(2)
     print(v)
+end
+```
+
+```
+42
+```
+
+**Same function shapes are only emitted once**
+
+```todo
+
+id = fun(v {}) {}:
+    v
+end
+
+the_answer = fun(s Str) Int:
+    42
+end
+
+main = fun():
+    print(id(137))
+    print(id({value = "PASS"}).value)
+    print(id(the_answer("Life, the universe, and everything")))
+end
+
+```
+
+```
+137
+PASS
+42
+```
+
+## Code Generation
+
+**Make sure there are no unused variables when returning a function**
+
+We actually use static dispatch during IR and code generation if we know
+that the function is a named function. This might lead to unused variables
+in the generated Go code. This test checks that we can cope with that.
+
+```klarer
+
+question = fun() fun(s Str) Int:
+    the_answer
+end
+
+the_answer = fun(s Str) Int:
+    42
+end
+
+main = fun():
+    print(question()("Life, the universe, and everything"))
 end
 ```
 

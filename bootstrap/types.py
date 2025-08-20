@@ -308,10 +308,11 @@ class Param:
 
 @dataclass(eq=True, frozen=True)
 class FunShape:
-    name: str | None
+    name: str | None = field(compare=False, hash=False)
     params: tuple[Param, ...]
     result: Shape
     behaviour: str | None
+    related: tuple[FunShape, ...] = field(compare=False, hash=False, repr=False)
     span: Span = field(compare=False, hash=False, repr=False)
     builtin: bool
 
@@ -445,7 +446,7 @@ class Scope:
         str_shape = PrimitiveShape("Str", Behaviours(("@Str",), scope), span)
         unit_shape = UnitShape(Behaviours((), scope), span)
         binding_defaults = {"builtin": True}
-        fun_defaults = {"span": span, "builtin": True}
+        fun_defaults = {"span": span, "builtin": True, "related": ()}
         to_str_shape = ProductShape.empty(span, scope)
         to_str_shape = replace(to_str_shape, behaviours=Behaviours(("@ToStr",), scope))
         scope.bindings["print"] = Binding(
@@ -563,8 +564,8 @@ class TypeCheck:
     type_env: TypeEnv
     errors: list[error.Error]
     scope: Scope
-    fun_specs: dict[FunShape, list[FunSpec]]
-    fun_defs: dict[FunShape, ast.FunDef]
+    fun_specs: dict[str, list[FunSpec]]
+    fun_defs: dict[str, ast.FunDef]
     nesting_level = 0
 
     Bool: Shape
@@ -602,7 +603,7 @@ class TypeCheck:
 
     def fun_spec(self, fun: FunShape, call_args: list[ast.Expr]) -> FunSpec | None:
         """Try to find a FunSpec for the given function with the given parameter types."""
-        specs = self.fun_specs.get(fun, [])
+        specs = self.fun_specs.get(fun.mangled_name(), [])
         param_types = [self.type_env.get(x) for x in call_args]
         for spec in specs:
             if spec.base == fun and [x.shape for x in spec.specialized.params] == param_types:
@@ -613,15 +614,46 @@ class TypeCheck:
         params: list[Param] = []
         for param, arg in zip(base.params, call_args):
             shape = self.type_env.get(arg)
+            if isinstance(shape, FunShape) and isinstance(param.shape, FunShape):
+                shape = replace(shape, name=None, related=(*param.shape.related, shape))
             params.append(Param(param.name, shape))
-        return FunShape(base.name, tuple(params), base.result, base.behaviour, base.span, builtin=base.builtin)
+        return FunShape(base.name, tuple(params), base.result, base.behaviour, (), base.span, builtin=base.builtin)
 
-    def specialize(self, base: FunShape, call_args: list[ast.Expr], span: Span) -> FunSpec | ErrorShape:
+    def specialize(self, base: FunShape, call_args: list[ast.Expr], span: Span) -> FunShape | ErrorShape:
+        if base.name:
+            assert not base.related, f"A named function should not have related functions: {base}"
+            first = self.specialize_single(base, call_args, span)
+            if isinstance(first, ErrorShape):
+                return first
+            return first.specialized
+        shape = None
+        for related in base.related:
+            spec = self.specialize_single(related, call_args, span)
+            if isinstance(spec, ErrorShape):
+                # todo: improve error message because it is weird that we through an error
+                #       for a seemingly unrelated function.
+                return spec
+            fun = spec.specialized
+            if shape is None:
+                shape = fun
+            else:
+                if fun.result.not_conforms_to(shape.result):
+                    # Results don't conform, make a sum shape.
+                    if not isinstance(shape.result, SumShape):
+                        shape = replace(shape, result=SumShape(None, (shape.result, fun.result), shape.span))
+                    else:
+                        shape = replace(shape, result=SumShape(None, (*shape.result.variants, fun.result), shape.span))
+                shape = replace(shape, related=(*shape.related, fun))
+        if shape is None:
+            return base
+        return shape
+
+    def specialize_single(self, base: FunShape, call_args: list[ast.Expr], span: Span) -> FunSpec | ErrorShape:
         with self.child_type_env():
-            fun_def = self.fun_defs[base]
+            fun_def = self.fun_defs[base.mangled_name()]
             specialized = self.build_specialized(base, call_args)
 
-            specs = self.fun_specs.get(base, [])
+            specs = self.fun_specs.get(base.mangled_name(), [])
             for spec in specs:
                 if spec.specialized == specialized:
                     return spec
@@ -630,7 +662,7 @@ class TypeCheck:
             spec = FunSpec(self.type_env, fun_def, base, specialized)
             specs.append(spec)
             if fun_def.body is not None:
-                self.fun_specs[base] = specs
+                self.fun_specs[base.mangled_name()] = specs
 
             log(
                 "typechecker-mono",
@@ -693,7 +725,7 @@ class TypeCheck:
             log("typechecker-trace", f"Forward declaring phase 1: {shape}", self.nesting_level)
             self.scope.bind(node.name, shape)
         for node in fun_defs:
-            shape = FunShape(node.name, (), self.Unit, None, node.span, builtin=False)
+            shape = FunShape(node.name, (), self.Unit, None, (), node.span, builtin=False)
             log("typechecker-trace", f"Forward declaring phase 1: {shape}", self.nesting_level)
             self.scope.bind(node.name, shape)
             if node.behaviour:
@@ -785,14 +817,11 @@ class TypeCheck:
                 return self.error(error.does_not_conform_to(str(specialized), str(callee), node.span, callee.span, err))
             return callee.result
 
-        if callee.is_named:
-            spec = self.specialize(callee, args, node.span)
-            if isinstance(spec, ErrorShape):
-                return ErrorShape(error.cascaded_error(spec.error, node.span))
-            self.type_env.set(node.callee, spec.specialized)
-            callee = spec.specialized
-
-        return callee.result
+        specialized = self.specialize(callee, args, node.span)
+        if isinstance(specialized, ErrorShape):
+            return ErrorShape(error.cascaded_error(specialized.error, node.span))
+        self.type_env.set(node.callee, specialized)
+        return specialized.result
 
     def tc_fun_decl(self, node: ast.FunDef) -> FunShape | ErrorShape:
         params: list[Param] = []
@@ -806,9 +835,9 @@ class TypeCheck:
         return_shape = self.type_env.get(node.result)
         if isinstance(return_shape, ErrorShape):
             return return_shape
-        shape = FunShape(node.name, (*params,), return_shape, node.behaviour, node.span, builtin=False)
+        shape = FunShape(node.name, (*params,), return_shape, node.behaviour, (), node.span, builtin=False)
         log("typechecker-trace", f"Adding {shape} to fun_defs", self.nesting_level)
-        self.fun_defs[shape] = node
+        self.fun_defs[shape.mangled_name()] = node
         if node.behaviour:
             log("typechecker-trace", f"Adding {shape} to behaviours", self.nesting_level)
             behaviour_binding = self.scope.lookup(node.behaviour)
@@ -863,7 +892,7 @@ class TypeCheck:
                 if isinstance(fun.result, ErrorShape):
                     return ErrorShape(error.cascaded_error(fun.result.error, node.span))
                 return self.error(error.invalid_main(node.span))
-            self.fun_specs[fun] = [FunSpec(self.type_env, node, fun, fun)]
+            self.fun_specs[fun.mangled_name()] = [FunSpec(self.type_env, node, fun, fun)]
         return shape
 
     def tc_fun_def_specialized(self, node: ast.FunDef, fun: FunShape) -> FunShape | ErrorShape:
@@ -893,7 +922,7 @@ class TypeCheck:
         result = self.type_env.get(node.result)
         if isinstance(result, ErrorShape):
             return result
-        return FunShape(None, (*params,), result, None, node.span, builtin=False)
+        return FunShape(None, (*params,), result, None, (), node.span, builtin=False)
 
     def tc_if(self, node: ast.If) -> Shape:
         ast.walk(node, self.visit)
@@ -908,6 +937,9 @@ class TypeCheck:
             # todo: if/else with different types should create a union type.
             if shape != else_shape:
                 return self.error(error.is_not_same(str(shape), str(else_shape), node.span))
+            if isinstance(shape, FunShape):
+                assert isinstance(else_shape, FunShape)
+                shape = replace(shape, name=None, related=(*shape.related, shape, else_shape))
         return shape
 
     def tc_if_arm(self, node: ast.IfArm) -> Shape:
@@ -937,9 +969,14 @@ class TypeCheck:
                 return value_shape
             if shape is None:
                 shape = value_shape
+                if isinstance(shape, FunShape):
+                    shape = replace(shape, name=None, related=(*shape.related, shape))
             elif shape != value_shape:
                 # todo: for now, all values in a list must have the same type.
                 return self.error(error.is_not_same(str(shape), str(value_shape), value_node.span))
+            elif isinstance(shape, FunShape):
+                assert isinstance(value_shape, FunShape)
+                shape = replace(shape, name=None, related=(*shape.related, value_shape))
         if shape is None:
             shape = ProductShape.empty(node.span, self.scope)
         return ListShape(shape, Behaviours((), self.scope), node.span)

@@ -105,7 +105,7 @@ class FuncGen:
                 assert isinstance(inst_reg.typ, ir.Struct)
                 struct_name = inst_reg.typ.fqn
                 code.write(f"{inst_reg} = &{struct_name}{{")
-                for i, arg_reg in enumerate(inst.args):
+                for i, arg_reg in enumerate(inst.args_):
                     if i > 0:
                         code.write(", ")
                     code.write(f"_{i}: {self.reg(arg_reg)}")
@@ -118,7 +118,7 @@ class FuncGen:
                 if inst_reg != ir.NoneReg:
                     code.write(f"{inst_reg} = ")
                 code.write(f"{callee}(")
-                code.writeln(", ".join(f"{self.reg(arg)}" for arg in inst.args) + ")")
+                code.writeln(", ".join(f"{self.reg(arg)}" for arg in inst.args_) + ")")
             case ir.GetPtr():
                 self.getptrs[inst_reg] = inst
                 src_reg = self.reg(inst.src)
@@ -242,12 +242,14 @@ class FuncGen:
     def declare_regs(self, code: Code) -> None:
         for block in self.fun_ir.blocks:
             for inst in block.insts:
-                if isinstance(inst.reg.typ, ir.NoneTyp):
+                reg = inst.reg
+                rtyp = reg.typ
+                if isinstance(rtyp, ir.NoneTyp):
                     continue
-                if inst.reg in self.reg_map:
+                if reg in self.reg_map:
                     continue
-                ref = "*" if isinstance(inst.reg.typ, ir.Struct) else ""
-                code.writeln(f"var {inst.reg} {ref}{typ(inst.reg.typ)}")
+                ref = "*" if isinstance(rtyp, ir.Struct) else ""
+                code.writeln(f"var {reg} {ref}{typ(rtyp)}")
 
     def generate(self) -> str:
         code = Code(0, [])

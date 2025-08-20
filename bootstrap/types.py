@@ -660,6 +660,10 @@ class TypeCheck:
 
             log("typechecker-mono", f">>> Specializing {base} at call-site {span}", self.nesting_level)
             spec = FunSpec(self.type_env, fun_def, base, specialized)
+
+            # We need to add the specialized function eagerly to support
+            # (mutually) recursive functions.
+            spec_idx = len(specs)
             specs.append(spec)
             if fun_def.body is not None:
                 self.fun_specs[base.mangled_name()] = specs
@@ -685,6 +689,18 @@ class TypeCheck:
                 return self.error(
                     error.does_not_conform_to(str(spec.specialized), str(spec.base), span, spec.base.span, err)
                 )
+
+            for i, existing in enumerate(specs):
+                if i == spec_idx:
+                    continue
+                if existing.specialized == spec.specialized:
+                    specs.pop(spec_idx)
+                    log(
+                        "typechecker-mono",
+                        f"<<< {spec.base} has already been specialized to {existing.specialized}",
+                        self.nesting_level,
+                    )
+                    return spec
 
             log(
                 "typechecker-mono",

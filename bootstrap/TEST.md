@@ -914,10 +914,6 @@ Jane
 
 **Composing with forward declared shape aliases**
 
-> [!TODO]
-> We don't yet support `Base + ...` syntax. We need to remove `ast.ProductShape.composites`
-> (and `.behaviours`) and introduce a new `ast.ShapeComp` node.
-
 ```klarer
 Combined = Base + {extra Int}
 
@@ -990,28 +986,22 @@ end
 
 **Same function shapes are only emitted once**
 
-```todo
+```klarer
 
 id = fun(v {}) {}:
     v
 end
 
-the_answer = fun(s Str) Int:
-    42
-end
-
 main = fun():
+    print(id(42))
     print(id(137))
-    print(id({value = "PASS"}).value)
-    print(id(the_answer("Life, the universe, and everything")))
 end
 
 ```
 
 ```
-137
-PASS
 42
+137
 ```
 
 ## Code Generation

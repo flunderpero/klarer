@@ -306,6 +306,138 @@ S
 S
 ```
 
+## Product Shapes
+
+```klarer
+
+main = fun():
+    v = {value = "PASS"}
+    print(v.value)
+end
+```
+
+```
+PASS
+```
+
+**Compound product shapes with shape aliases**
+
+```klarer
+
+Person = {name Str, age Int}
+PersonWithCity = Person + {city Str}
+
+main = fun():
+    v = PersonWithCity{name = "John", age = 42, city = "Berlin"}
+    print(v.name)
+    print(v.city)
+end
+```
+
+```
+John
+Berlin
+```
+
+### Product Shape Literals
+
+**Compound product shape literals**
+
+```klarer
+Person = {name Str, age Int}
+
+main = fun():
+    v = {name = "John", age = 42} + {city = "Berlin"}
+    print(v.name)
+    print(v.city)
+end
+```
+
+```
+John
+Berlin
+```
+
+**Using a shape alias verifies the literal conforms to the shape alias**
+
+```klarer
+Person = {name Str, age Int}
+
+main = fun():
+    p = Person{name = "John"} -- ERROR: `{name Str}` does not conform to shape `Person`
+end
+```
+
+## Sum Shapes
+
+```klarer
+
+Shape = Int | {value Str} | fun(s Str) Int
+
+-- This function effectively asserts that `v` conforms to the shape `Shape`.
+assert_shape = fun(v Shape) Shape:
+    v
+end
+
+the_answer = fun(s Str) Int:
+    42
+end
+
+main = fun():
+    print(assert_shape(137))
+    print(assert_shape({value = "PASS"}).value)
+    -- todo print(assert_shape(the_answer)("Life, the universe, and everything"))
+end
+
+```
+
+```
+137
+PASS
+```
+
+**Compound shapes that are part of a sum shape cannot be created with the sum shape name**
+
+```klarer
+Shape = Int | {value Str} | fun(a Str) Int
+
+main = fun():
+    v = Shape{value = "FAIL"} -- ERROR: Expected a product shape, got Shape(Int | {value Str} | fun(a Str) -> Int)
+end
+```
+
+**Sum shapes and compound shapes with behaviours**
+
+```klarer
+Shape = Int | {value Str} + {extra Int} + @PrintValue | Str
+
+@PrintValue.print_value = fun(v {value Str, extra Int}):
+    print(v.value)
+    print(v.extra)
+end
+
+-- This function effectively asserts that `v` conforms to the shape `Shape`.
+assert_shape = fun(v Shape) Shape:
+    v
+end
+
+main = fun():
+    v = {value = "PASS1", extra = 42} + @PrintValue
+    assert_shape(v).print_value()
+
+    print(assert_shape(137))
+
+    print(assert_shape("PASS2"))
+end
+```
+
+```
+PASS1
+42
+137
+PASS2
+```
+
 ## If Expressions
 
 ```klarer
@@ -657,7 +789,7 @@ Jane
 > We don't yet support `Base + ...` syntax. We need to remove `ast.ProductShape.composites`
 > (and `.behaviours`) and introduce a new `ast.ShapeComp` node.
 
-```todo
+```klarer
 Combined = Base + {extra Int}
 
 Base = {value Str}

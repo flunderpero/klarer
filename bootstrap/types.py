@@ -215,6 +215,14 @@ class ProductShape:
     def is_empty(self) -> bool:
         return not self.fields
 
+    def merge(self, other: ProductShape) -> ProductShape:
+        fields = list(self.fields)
+        for field in other.fields:
+            if field.name not in [x.name for x in fields]:
+                fields.append(field)
+        behaviours = self.behaviours.merge(other.behaviours)
+        return ProductShape(None, tuple(fields), behaviours, self.span)
+
     def not_conforms_to(self, other: Shape) -> error.Error | None:
         """A product shape conforms the other shape if it has at least all the
         fields of the other shape conform.
@@ -229,7 +237,10 @@ class ProductShape:
         if any of the variants conform to the product shape.
 
         """
-        if isinstance(other, SumShape) and not any(x.not_conforms_to(other) for x in other.variants):
+        if isinstance(other, SumShape):
+            for variant in other.variants:
+                if not self.not_conforms_to(variant):
+                    return None
             return error.shape_is_not_a_variant(str(other), str(self), other.span, self.span)
 
         if not isinstance(other, ProductShape):
@@ -250,13 +261,13 @@ class ProductShape:
 class SumShape:
     name: str | None
     variants: tuple[Shape, ...]
-    behaviours: Behaviours
     span: Span = field(compare=False, hash=False, repr=False)
 
     def __str__(self) -> str:
         variants = " | ".join(str(x) for x in self.variants)
-        name = f" {self.name}" if self.name else ""
-        return f"{name} {variants}"
+        if self.name:
+            return f"{self.name}({variants})"
+        return variants
 
     def mangled_name(self) -> str:
         name = [x.mangled_name() for x in sorted_tuple(self.variants)]
@@ -333,12 +344,20 @@ class FunShape:
         """A function conforms the empty shape or another function if all
         its parameters and result conform the other function's parameters and result.
 
+        If `other` is a sum shape, then the function conforms to the sum shape
+        if any of the variants conform to the function.
+
         Examples:
         - fun(a {name Str}) conforms to fun(a {})
 
         """
         if isinstance(other, ProductShape) and other.is_empty():
             return None
+        if isinstance(other, SumShape):
+            for variant in other.variants:
+                if not self.not_conforms_to(variant):
+                    return None
+            return error.shape_is_not_a_variant(str(other), str(self), other.span, self.span)
         if not isinstance(other, FunShape):
             return error.unexpected_shape("a function", str(other), other.span)
         if self.result.not_conforms_to(other.result):
@@ -670,7 +689,7 @@ class TypeCheck:
 
         # Phase 1: Declare the names with basic shapes.
         for node in shape_aliases:
-            shape = FunShape(node.name, (), self.Unit, None, node.span, builtin=False)
+            shape = ProductShape.empty(node.span, self.scope)
             log("typechecker-trace", f"Forward declaring phase 1: {shape}", self.nesting_level)
             self.scope.bind(node.name, shape)
         for node in fun_defs:
@@ -965,6 +984,28 @@ class TypeCheck:
         assert isinstance(name.value, Shape)
         return name.value
 
+    def tc_compound_shape(self, node: ast.CompoundShape) -> Shape:
+        # Build a product shape of the compound shape by merging the shapes left to right
+        # with right precedence.
+        ast.walk(node, self.visit)
+        result: ProductShape | None = None
+        for shape_node in node.shapes:
+            shape = self.type_env.get(shape_node)
+            if isinstance(shape, ErrorShape):
+                return shape
+            if not isinstance(shape, ProductShape):
+                return self.error(error.unexpected_shape("a product shape", str(shape), shape.span))
+            result = shape if result is None else result.merge(shape)
+        assert result
+        behaviours = []
+        for behaviour_node in node.behaviours:
+            behaviour_binding = self.scope.lookup(behaviour_node.name)
+            if not behaviour_binding:
+                return self.error(error.undefined_name(behaviour_node.name, behaviour_node.span))
+            assert isinstance(behaviour_binding.value, Behaviour)
+            behaviours.append(behaviour_binding.value.name)
+        return replace(result, behaviours=Behaviours(tuple(behaviours), self.scope))
+
     def tc_product_shape(self, node: ast.ProductShape) -> Shape:
         ast.walk(node, self.visit)
         fields: list[Field] = []
@@ -978,6 +1019,19 @@ class TypeCheck:
             else:
                 field = Field.with_shape(field_node.name, shape)
             fields.append(field)
+        return ProductShape(None, tuple(fields), Behaviours((), self.scope), node.span)
+
+    def tc_compound_shape_lit(self, node: ast.CompoundShapeLit) -> Shape:
+        ast.walk(node, self.visit)
+        result: ProductShape | None = None
+        for shape_node in node.shapes:
+            shape = self.type_env.get(shape_node)
+            if isinstance(shape, ErrorShape):
+                return shape
+            if not isinstance(shape, ProductShape):
+                return self.error(error.unexpected_shape("a product shape", str(shape), shape.span))
+            result = shape if result is None else result.merge(shape)
+        assert result
         behaviours = []
         for behaviour_node in node.behaviours:
             behaviour_binding = self.scope.lookup(behaviour_node.name)
@@ -985,7 +1039,7 @@ class TypeCheck:
                 return self.error(error.undefined_name(behaviour_node.name, behaviour_node.span))
             assert isinstance(behaviour_binding.value, Behaviour)
             behaviours.append(behaviour_binding.value.name)
-        return ProductShape(None, tuple(fields), Behaviours(tuple(behaviours), self.scope), node.span)
+        return replace(result, behaviours=result.behaviours.merge(Behaviours(tuple(behaviours), self.scope)))
 
     def tc_product_shape_lit(self, node: ast.ProductShapeLit) -> Shape:
         ast.walk(node, self.visit)
@@ -996,38 +1050,20 @@ class TypeCheck:
             if isinstance(shape, ErrorShape):
                 return shape
             fields.append(Field.with_shape(field.name, shape))
-        behaviours = []
-        for behaviour_node in node.behaviours:
-            behaviour = self.scope.lookup(behaviour_node.name)
-            if not behaviour:
-                return self.error(error.undefined_name(behaviour_node.name, behaviour_node.span))
-            assert isinstance(behaviour.value, Behaviour)
-            behaviours.append(behaviour_node.name)
-        for composite_node in node.composites:
-            composite = self.type_env.get(composite_node)
-            if isinstance(composite, ErrorShape):
-                return composite
-            assert isinstance(composite, ProductShape)
-            assert not composite.behaviours
-            # Merge fields from composite into the shape.
-            for composite_fields in composite.fields:
-                index = fields.index(composite_fields)
-                if index < 0:
-                    fields.append(composite_fields)
-                else:
-                    fields[index] = composite_fields
-        shape = ProductShape(None, tuple(fields), Behaviours(tuple(behaviours), self.scope), node.span)
-        if node.shape_ref:
-            shape_ref = self.type_env.get(node.shape_ref)
+        shape = ProductShape(None, tuple(fields), Behaviours((), self.scope), node.span)
+        if node.shape_name:
+            shape_ref_binding = self.scope.lookup(node.shape_name)
+            if not shape_ref_binding:
+                return self.error(error.undefined_name(node.shape_name, node.span))
+            if not isinstance(shape_ref_binding.value, ProductShape):
+                return self.error(error.unexpected_shape("a product shape", str(shape_ref_binding.value), node.span))
+            shape_ref = shape_ref_binding.value
             if isinstance(shape_ref, ErrorShape):
                 return shape_ref
-            if not isinstance(shape_ref, FunShape):
-                shape = replace(shape, behaviours=shape.behaviours.merge(shape_ref.behaviours))
+            shape = replace(shape, behaviours=shape.behaviours.merge(shape_ref.behaviours))
             if err := shape.not_conforms_to(shape_ref):
-                return self.error(
-                    error.does_not_conform_to(str(shape), node.shape_ref.name, node.span, node.shape_ref.span, err)
-                )
-            shape = replace(shape, name=node.shape_ref.name)
+                return self.error(error.does_not_conform_to(str(shape), node.shape_name, node.span, node.span, err))
+            shape = replace(shape, name=node.shape_name)
         return shape
 
     def tc_shape_lit_field(self, node: ast.ShapeLitField) -> Shape:
@@ -1051,14 +1087,7 @@ class TypeCheck:
     def tc_sum_shape(self, node: ast.SumShape) -> Shape:
         ast.walk(node, self.visit)
         variants = [self.type_env.get(variant) for variant in node.variants]
-        behaviours = []
-        for behaviour_node in node.behaviours:
-            behaviour = self.scope.lookup(behaviour_node.name)
-            if not behaviour:
-                return self.error(error.undefined_name(behaviour_node.name, behaviour_node.span))
-            assert isinstance(behaviour.value, Behaviour)
-            behaviours.append(behaviour_node.name)
-        return SumShape(None, tuple(variants), Behaviours(tuple(behaviours), self.scope), node.span)
+        return SumShape(None, tuple(variants), node.span)
 
     def visit(self, node: ast.Node, _parent: ast.Node | None) -> ast.Node:
         shape: Shape
@@ -1079,6 +1108,10 @@ class TypeCheck:
                 shape = self.tc_call(node)
             case ast.CharLit():
                 shape = self.Char
+            case ast.CompoundShape():
+                shape = self.tc_compound_shape(node)
+            case ast.CompoundShapeLit():
+                shape = self.tc_compound_shape_lit(node)
             case ast.FunDef():
                 shape = self.tc_fun_def(node)
             case ast.Param():

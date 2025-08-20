@@ -198,3 +198,19 @@ def failed_to_specialize(specialized: str, base: str, self_span: Span, other_spa
         error,
         _stack(),
     )
+
+
+def sum_shapes_cannot_be_used_in_a_compound_shape(span: Span) -> Error:
+    return SimpleError(span, "Sum shapes cannot be used in a compound shape", _stack())
+
+
+def fun_shapes_cannot_have_behaviours(span: Span) -> Error:
+    return SimpleError(span, "Function shapes cannot have behaviours", _stack())
+
+
+def fun_shapes_cannot_be_used_in_a_compound_shape(span: Span) -> Error:
+    return SimpleError(span, "Function shapes cannot be used in a compound shape", _stack())
+
+
+def list_shapes_cannot_be_used_in_a_compound_shape(span: Span) -> Error:
+    return SimpleError(span, "List shapes cannot be used in a compound shape", _stack())

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import TYPE_CHECKING, Callable, Literal, cast
+from typing import TYPE_CHECKING, Any, Callable, Literal, cast
 
 if TYPE_CHECKING:
     from .span import FQN, Span
@@ -129,19 +129,27 @@ class ListIndex:
 
 
 @dataclass
-class ProductShapeLit:
+class CompoundShapeLit:
     id: NodeId = field(compare=False, hash=False, repr=False)
-    fields: list[ShapeLitField]
-    shape_ref: ShapeRef | None
-    composites: list[ProductShapeLit]
+    shapes: list[ProductShapeLit]
     behaviours: list[Behaviour]
     span: Span = field(compare=False, hash=False, repr=False)
 
     def __str__(self) -> str:
-        shape_ref = f"{self.shape_ref}" if self.shape_ref else ""
-        composites = " + " + " + ".join(str(x) for x in self.composites) if self.composites else ""
         behaviours = " + " + " + ".join(str(x) for x in self.behaviours) if self.behaviours else ""
-        return nid(self.id) + f"{shape_ref}{{{', '.join(str(x) for x in self.fields)}}}{composites}{behaviours}"
+        return nid(self.id) + f"{{{', '.join(str(x) for x in self.shapes)}}}{behaviours}"
+
+
+@dataclass
+class ProductShapeLit:
+    id: NodeId = field(compare=False, hash=False, repr=False)
+    fields: list[ShapeLitField]
+    shape_name: str | None
+    span: Span = field(compare=False, hash=False, repr=False)
+
+    def __str__(self) -> str:
+        shape_name = f"{self.shape_name}" if self.shape_name else ""
+        return nid(self.id) + f"{shape_name}{{{', '.join(str(x) for x in self.fields)}}}"
 
 
 @dataclass
@@ -169,10 +177,12 @@ class ShapeAlias:
 class ShapeRef:
     id: NodeId = field(compare=False, hash=False, repr=False)
     name: str
+    behaviours: list[Behaviour]
     span: Span = field(compare=False, hash=False, repr=False)
 
     def __str__(self) -> str:
-        return nid(self.id) + self.name
+        behaviours = " + " + " + ".join(str(x) for x in self.behaviours) if self.behaviours else ""
+        return nid(self.id) + self.name + behaviours
 
 
 @dataclass
@@ -200,37 +210,46 @@ class FunShape:
 class ListShape:
     id: NodeId = field(compare=False, hash=False, repr=False)
     inner: Shape
+    behaviours: list[Behaviour]
     span: Span = field(compare=False, hash=False, repr=False)
 
     def __str__(self) -> str:
-        return nid(self.id) + f"[{self.inner}]"
+        behaviours = " + " + " + ".join(str(x) for x in self.behaviours) if self.behaviours else ""
+        return nid(self.id) + f"[{self.inner}]{behaviours}"
+
+
+@dataclass
+class CompoundShape:
+    id: NodeId = field(compare=False, hash=False, repr=False)
+    shapes: list[ProductShape | ShapeRef]
+    behaviours: list[Behaviour]
+    span: Span = field(compare=False, hash=False, repr=False)
+
+    def __str__(self) -> str:
+        behaviours = " + " + " + ".join(str(x) for x in self.behaviours) if self.behaviours else ""
+        shapes = " + " + " + ".join(str(x) for x in self.shapes)
+        return nid(self.id) + f"{shapes}{behaviours}"
 
 
 @dataclass
 class ProductShape:
     id: NodeId = field(compare=False, hash=False, repr=False)
     fields: list[Field]
-    behaviours: list[Behaviour]
-    composites: list[Shape]
     span: Span = field(compare=False, hash=False, repr=False)
 
     def __str__(self) -> str:
         fields = ", ".join(str(x) for x in self.fields)
-        composites = " + " + " + ".join(str(x) for x in self.composites) if self.composites else ""
-        behaviours = " + " + " + ".join(str(x) for x in self.behaviours) if self.behaviours else ""
-        return nid(self.id) + f"{{{fields}}}{composites}{behaviours}"
+        return nid(self.id) + f"{{{fields}}}"
 
 
 @dataclass
 class SumShape:
     id: NodeId = field(compare=False, hash=False, repr=False)
     variants: list[Shape]
-    behaviours: list[Behaviour]
     span: Span = field(compare=False, hash=False, repr=False)
 
     def __str__(self) -> str:
-        behaviours = " + " + " + ".join(str(x) for x in self.behaviours) if self.behaviours else ""
-        return nid(self.id) + " | ".join(str(x) for x in self.variants) + behaviours
+        return nid(self.id) + " | ".join(str(x) for x in self.variants)
 
 
 @dataclass
@@ -373,13 +392,14 @@ class Module:
         return nid(self.id) + f"mod {self.fqn}\n" + "\n".join(str(x) for x in self.nodes)
 
 
-Shape = ShapeRef | FunShape | ProductShape | SumShape | UnitShape | ListShape
+Shape = ShapeRef | FunShape | ProductShape | SumShape | UnitShape | ListShape | CompoundShape
 Expr = (
     BinaryExpr
     | Block
     | BoolLit
     | Call
     | CharLit
+    | CompoundShapeLit
     | If
     | IntLit
     | Member
@@ -442,15 +462,17 @@ def walk(node: Node, visit_: ASTVisitor) -> bool:
             node.target = cast(Expr, visit(node.target, node))
         case ShapeAlias():
             node.shape = cast(Shape, visit(node.shape, node))
+        case ShapeRef():
+            for i, behaviour in enumerate(node.behaviours):
+                node.behaviours[i] = cast(Behaviour, visit(behaviour, node))
         case ProductShapeLit():
             for i, field in enumerate(node.fields):
                 node.fields[i] = cast(ShapeLitField, visit(field, node))
-            if node.shape_ref:
-                node.shape_ref = cast(ShapeRef, visit(node.shape_ref, node))
+        case CompoundShapeLit():
+            for i, shape in enumerate(node.shapes):
+                node.shapes[i] = cast(ProductShapeLit, visit(shape, node))
             for i, behaviour in enumerate(node.behaviours):
                 node.behaviours[i] = cast(Behaviour, visit(behaviour, node))
-            for i, composite in enumerate(node.composites):
-                node.composites[i] = cast(ProductShapeLit, visit(composite, node))
         case ShapeLitField():
             node.value = cast(Expr, visit(node.value, node))
         case Field():
@@ -466,15 +488,14 @@ def walk(node: Node, visit_: ASTVisitor) -> bool:
         case ProductShape():
             for i, field in enumerate(node.fields):
                 node.fields[i] = cast(Field, visit(field, node))
-            for i, composite in enumerate(node.composites):
-                node.composites[i] = cast(Shape, visit(composite, node))
+        case CompoundShape():
+            for i, shape in enumerate(node.shapes):
+                node.shapes[i] = cast(Any, visit(shape, node))
             for i, behaviour in enumerate(node.behaviours):
                 node.behaviours[i] = cast(Behaviour, visit(behaviour, node))
         case SumShape():
             for i, variant in enumerate(node.variants):
                 node.variants[i] = cast(Shape, visit(variant, node))
-            for i, behaviour in enumerate(node.behaviours):
-                node.behaviours[i] = cast(Behaviour, visit(behaviour, node))
         case FunShape():
             for i, param in enumerate(node.params):
                 node.params[i] = cast(Param, visit(param, node))

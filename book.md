@@ -283,7 +283,8 @@ behaviours.
 
 Sum shapes also conform to the empty shape (`{}`).
 
-Sum shapes can have behaviours attached to them.
+Sum shapes cannot have behaviours attached to them. Behaviour methods emerge naturally if all
+variants of a sum shape have the same behaviour method.
 
 #### Function Shapes: `fun(in Str) Int`
 

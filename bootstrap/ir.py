@@ -3,7 +3,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import Enum
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from . import ast, types
 from .span import log
@@ -713,11 +713,19 @@ class FunGen:
                 self.emit(GetListPtr(getptr_reg, src, index), None)
                 reg = self.reg(src.typ.typ)
                 self.emit(Load(reg, getptr_reg), node)
-            case ast.ProductShapeLit():
-                ast.walk(node, self.generate)
-                # We need to sort the fields by name because we did so in `typ()` when
+            case ast.CompoundShapeLit():
+                # We need to accumulate and sort the fields by name because we did so in `typ()` when
                 # construction the struct type.
-                regs = [self.node_regs[x.id] for x in sorted(node.fields, key=lambda x: x.name)]
+                fields = []
+                for shape_node in node.shapes:
+                    fields.extend(shape_node.fields)
+                sorted_fields = sorted(fields, key=lambda x: x.name)
+                regs: list[Any] = [None] * len(sorted_fields)
+                for shape_node in node.shapes:
+                    for field in shape_node.fields:
+                        i = sorted_fields.index(field)
+                        self.generate(field, shape_node)
+                        regs[i] = self.node_regs[field.id]
                 typ = self.typ(self.type_env.get(node))
                 reg = self.reg(typ)
                 self.emit(Alloc(reg, regs), node)
@@ -826,7 +834,15 @@ class FunGen:
                                 raise AssertionError(f"Unsupported type for equality comparison: {lhs_reg.typ}")
                     case _:
                         raise AssertionError(f"Unsupported binary op: {node.op}")
-            case ast.ShapeRef() | ast.Param() | ast.UnitShape() | ast.Behaviour() | ast.ProductShape():
+            case (
+                ast.ShapeRef()
+                | ast.Param()
+                | ast.UnitShape()
+                | ast.Behaviour()
+                | ast.ProductShape()
+                | ast.ProductShapeLit()  # ProductShapeLit is always wrapped in a CompoundShapeLit.
+                | ast.CompoundShape()
+            ):
                 pass
             case _:
                 raise AssertionError(f"Unsupported node: {node.__class__}")

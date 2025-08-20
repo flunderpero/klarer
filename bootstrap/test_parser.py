@@ -35,15 +35,19 @@ def test_complex_fun_def() -> None:
                 ast.Param,
                 name="b",
                 shape=node(
-                    ast.ProductShape,
-                    fields=[node(ast.Field, name="value", shape=str_shape)],
+                    ast.CompoundShape,
+                    shapes=[
+                        node(ast.ProductShape, fields=[node(ast.Field, name="value", shape=str_shape)]),
+                    ],
                     behaviours=[node(ast.Behaviour, name="@Value")],
                 ),
             ),
         ],
         result=node(
-            ast.ProductShape,
-            fields=[node(ast.Field, name="value", shape=str_shape)],
+            ast.CompoundShape,
+            shapes=[
+                node(ast.ProductShape, fields=[node(ast.Field, name="value", shape=str_shape)]),
+            ],
             behaviours=[node(ast.Behaviour, name="@Value")],
         ),
         body=node(ast.Block, nodes=[]),
@@ -67,7 +71,7 @@ def test_shape_alias() -> None:
 
 def test_product_shapes() -> None:
     assert parse_shape_alias("Foo = {a Int}", "Foo") == node(
-        ast.ProductShape, fields=[node(ast.Field, name="a", shape=int_shape)]
+        ast.CompoundShape, shapes=[node(ast.ProductShape, fields=[node(ast.Field, name="a", shape=int_shape)])]
     )
 
 
@@ -80,22 +84,37 @@ def test_complex_shapes() -> None:
         ast.SumShape,
         variants=[
             node(
-                ast.ProductShape,
-                fields=[node(ast.Field, name="a", shape=int_shape), node(ast.Field, name="b", shape=str_shape)],
+                ast.CompoundShape,
+                shapes=[
+                    node(
+                        ast.ProductShape,
+                        fields=[node(ast.Field, name="a", shape=int_shape), node(ast.Field, name="b", shape=str_shape)],
+                    ),
+                ],
             ),
             int_shape,
             node(
-                ast.ProductShape,
-                fields=[
+                ast.CompoundShape,
+                shapes=[
                     node(
-                        ast.Field,
-                        name="c",
-                        shape=node(
-                            ast.ProductShape,
-                            fields=[node(ast.Field, name="d", shape=bool_shape)],
-                            behaviours=[node(ast.Behaviour, name="@Bar")],
-                        ),
-                    )
+                        ast.ProductShape,
+                        fields=[
+                            node(
+                                ast.Field,
+                                name="c",
+                                shape=node(
+                                    ast.CompoundShape,
+                                    shapes=[
+                                        node(
+                                            ast.ProductShape,
+                                            fields=[node(ast.Field, name="d", shape=bool_shape)],
+                                        ),
+                                    ],
+                                    behaviours=[node(ast.Behaviour, name="@Bar")],
+                                ),
+                            )
+                        ],
+                    ),
                 ],
             ),
         ],
@@ -111,45 +130,66 @@ def test_behaviour_has_to_come_after_composition() -> None:
 
 def test_shape_product_literal_basics() -> None:
     assert parse_first("{a = 42}") == node(
-        ast.ProductShapeLit, fields=[node(ast.ShapeLitField, name="a", value=node(ast.IntLit, value=42))]
+        ast.CompoundShapeLit,
+        shapes=[
+            node(ast.ProductShapeLit, fields=[node(ast.ShapeLitField, name="a", value=node(ast.IntLit, value=42))])
+        ],
     )
 
 
-def test_shape_product_literal_with_shape_ref() -> None:
+def test_shape_product_literal_with_shape_name() -> None:
     assert parse_first("Foo{a = 42}") == node(
-        ast.ProductShapeLit,
-        shape_ref=node(ast.ShapeRef, name="Foo"),
-        fields=[node(ast.ShapeLitField, name="a", value=node(ast.IntLit, value=42))],
+        ast.CompoundShapeLit,
+        shapes=[
+            node(
+                ast.ProductShapeLit,
+                shape_name="Foo",
+                fields=[node(ast.ShapeLitField, name="a", value=node(ast.IntLit, value=42))],
+            )
+        ],
     )
 
 
 def test_shape_literal_with_behaviour() -> None:
     assert parse_first("{a = 42} + @Foo") == node(
-        ast.ProductShapeLit,
-        fields=[node(ast.ShapeLitField, name="a", value=node(ast.IntLit, value=42))],
+        ast.CompoundShapeLit,
+        shapes=[
+            node(
+                ast.ProductShapeLit,
+                fields=[node(ast.ShapeLitField, name="a", value=node(ast.IntLit, value=42))],
+            )
+        ],
         behaviours=[node(ast.Behaviour, name="@Foo")],
     )
 
 
-def test_composite_product_shape_literal() -> None:
+def test_compound_product_shape_literal() -> None:
     assert parse_first("{a = {b = 42} + Foo{c = 137} + @Bar}") == node(
-        ast.ProductShapeLit,
-        fields=[
+        ast.CompoundShapeLit,
+        shapes=[
             node(
-                ast.ShapeLitField,
-                name="a",
-                value=node(
-                    ast.ProductShapeLit,
-                    fields=[node(ast.ShapeLitField, name="b", value=node(ast.IntLit, value=42))],
-                    composites=[
-                        node(
-                            ast.ProductShapeLit,
-                            fields=[node(ast.ShapeLitField, name="c", value=node(ast.IntLit, value=137))],
-                            shape_ref=node(ast.ShapeRef, name="Foo"),
-                        )
-                    ],
-                    behaviours=[node(ast.Behaviour, name="@Bar")],
-                ),
+                ast.ProductShapeLit,
+                fields=[
+                    node(
+                        ast.ShapeLitField,
+                        name="a",
+                        value=node(
+                            ast.CompoundShapeLit,
+                            shapes=[
+                                node(
+                                    ast.ProductShapeLit,
+                                    fields=[node(ast.ShapeLitField, name="b", value=node(ast.IntLit, value=42))],
+                                ),
+                                node(
+                                    ast.ProductShapeLit,
+                                    fields=[node(ast.ShapeLitField, name="c", value=node(ast.IntLit, value=137))],
+                                    shape_name="Foo",
+                                ),
+                            ],
+                            behaviours=[node(ast.Behaviour, name="@Bar")],
+                        ),
+                    )
+                ],
             )
         ],
     )

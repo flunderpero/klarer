@@ -651,15 +651,15 @@ class TypeCheck:
     def specialize_single(self, base: FunShape, call_args: list[ast.Expr], span: Span) -> FunSpec | ErrorShape:
         with self.child_type_env():
             fun_def = self.fun_defs[base.mangled_name()]
-            specialized = self.build_specialized(base, call_args)
+            specialized_step1 = self.build_specialized(base, call_args)
 
             specs = self.fun_specs.get(base.mangled_name(), [])
             for spec in specs:
-                if spec.specialized == specialized:
+                if spec.specialized == specialized_step1:
                     return spec
 
             log("typechecker-mono", f">>> Specializing {base} at call-site {span}", self.nesting_level)
-            spec = FunSpec(self.type_env, fun_def, base, specialized)
+            spec = FunSpec(self.type_env, fun_def, base, specialized_step1)
 
             # We need to add the specialized function eagerly to support
             # (mutually) recursive functions.
@@ -668,27 +668,46 @@ class TypeCheck:
             if fun_def.body is not None:
                 self.fun_specs[base.mangled_name()] = specs
 
+            # We need to build a defunctionalized version of the specialized function
+            # that removes all function parameters. These functions are moved into the
+            # function body.
+            specialized_step2 = replace(
+                specialized_step1,
+                params=tuple([param for param in specialized_step1.params if not isinstance(param.shape, FunShape)]),
+            )
+
             log(
                 "typechecker-mono",
-                f"Type checking {spec.base} at {spec.fun_def.span} with {spec.specialized} at call-site {span}",
+                f"Type checking {spec.base} at {spec.fun_def.span} with {specialized_step2} at call-site {span}",
                 self.nesting_level,
             )
             error_mark = len(self.errors)
-            shape = self.tc_fun_def_specialized(spec.fun_def, spec.specialized)
+            with self.child_scope(spec.fun_def):
+                for param in specialized_step1.params:
+                    self.scope.bind(param.name, param.shape)
+                ast.walk(spec.fun_def, self.visit)
+                result_shape = self.type_env.get(spec.fun_def.body) if spec.fun_def.body else specialized_step1.result
+                if isinstance(result_shape, ErrorShape):
+                    return ErrorShape(error.cascaded_error(result_shape.error, span))
+                specialized_step1 = replace(specialized_step1, result=result_shape)
+                specialized_step2 = replace(specialized_step2, result=result_shape)
+
             if len(self.errors) > error_mark:
                 # Rewind the error stack to the point where we started.
                 errors = self.errors[error_mark:]
                 self.errors = self.errors[:error_mark]
                 self.error(
-                    error.failed_to_specialize(str(spec.specialized), str(spec.base), span, spec.base.span, errors[0])
+                    error.failed_to_specialize(str(specialized_step1), str(spec.base), span, spec.base.span, errors[0])
                 )
-            if isinstance(shape, ErrorShape):
-                return ErrorShape(error.cascaded_error(shape.error, span))
-            spec.specialized = replace(spec.specialized, result=shape.result)
-            if err := spec.specialized.not_conforms_to(spec.base):
+
+            # Check whether `specialized_step1` conforms to `spec.base`.
+            if err := specialized_step1.not_conforms_to(spec.base):
                 return self.error(
-                    error.does_not_conform_to(str(spec.specialized), str(spec.base), span, spec.base.span, err)
+                    error.does_not_conform_to(str(specialized_step1), str(spec.base), span, spec.base.span, err)
                 )
+
+            # The specialized function is now the defunctionalized.
+            spec.specialized = specialized_step2
 
             for i, existing in enumerate(specs):
                 if i == spec_idx:
@@ -910,15 +929,6 @@ class TypeCheck:
                 return self.error(error.invalid_main(node.span))
             self.fun_specs[fun.mangled_name()] = [FunSpec(self.type_env, node, fun, fun)]
         return shape
-
-    def tc_fun_def_specialized(self, node: ast.FunDef, fun: FunShape) -> FunShape | ErrorShape:
-        with self.child_scope(node):
-            for param in fun.params:
-                if err := self.scope.bind(param.name, param.shape):
-                    return self.error(err)
-            ast.walk(node, self.visit)
-        return_typ = self.type_env.get(node.body) if node.body else fun.result
-        return replace(fun, result=return_typ)
 
     def tc_fun_param(self, node: ast.Param) -> Shape:
         ast.walk(node, self.visit)

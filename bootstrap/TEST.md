@@ -572,11 +572,32 @@ PASS1
 
 ## Functions
 
+### Functions as Values
+
 **A function can be passed to another function**
 
+```klarer
+
+print_me = fun(v {}, f fun(v {}) {}):
+    print(f(v))
+end
+
+id = fun(v {}) {}: v end
+
+main = fun():
+    print_me("PASS", id)
+end
+
+```
+
+```
+PASS
+```
+
+**Pass a function multiple times**
+
 > [!TODO]
-> We need to specialize `print_me(v {}, f fun(v {}) {})` to `print_me__id(v Str)`
-> and replace `f` with `id`.
+> The way we defunctionalize functions is not correct. This code does not compile.
 
 ```todo
 
@@ -587,7 +608,7 @@ end
 id = fun(v {}) {}: v end
 
 main = fun():
-    print_me("PASS", id)
+    print_me("PASS", id(id))
 end
 
 ```

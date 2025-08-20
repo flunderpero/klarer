@@ -452,6 +452,14 @@ class StrConst:
     reg: Reg
     value: str
 
+    @staticmethod
+    def make_reg(i: int) -> Reg:
+        return Reg(f"s{i}", Str())
+
+    @staticmethod
+    def is_str_const(reg: Reg) -> bool:
+        return reg.id[0] == "s"
+
     def __str__(self) -> str:
         return f'{self.reg.id} = "{self.value}"'
 
@@ -683,7 +691,7 @@ class FunGen:
             case ast.StrLit():
                 const = self.ir.constant_pool.get(node.value)
                 if not const:
-                    reg = Reg(f"s{len(self.ir.constant_pool)}", Str())
+                    reg = StrConst.make_reg(len(self.ir.constant_pool))
                     const = StrConst(reg, node.value)
                     self.ir.constant_pool[node.value] = const
                 self.emit(GetPtr(reg=self.reg(Str()), src=const.reg), node)
@@ -787,6 +795,13 @@ class FunGen:
                 fun = callee
                 ast.walk(node, self.generate)
                 args = [self.node_regs[x.id] for x in node.args]
+                # We have to remove all parameters that are functions because they have been
+                # defunctionalized, i.e. moved from the call signature into the function body.
+                args = [
+                    x
+                    for x in args
+                    if not isinstance(x.typ, Fun) and not (isinstance(x.typ, Ptr) and isinstance(x.typ.typ, Fun))
+                ]
                 if fun.behaviour:
                     # This is a behaviour function call, prepend the receiver to the args.
                     assert isinstance(node.callee, ast.Member), f"Expected Member, got {node.callee}"

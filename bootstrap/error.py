@@ -43,6 +43,7 @@ class WithDefinitionError:
     span: Span
     message: str
     defined_here: Span
+    cause: Error | None
     stacktrace: str
 
     def __str__(self) -> str:
@@ -51,7 +52,10 @@ class WithDefinitionError:
         if self.defined_here.start == 0 and self.defined_here.end == 0:
             return s
         defined_here_code = "\n".join(self.defined_here.formatted_lines())
-        return s + f"\nDefined here:\n{defined_here_code}"
+        s += f"\nDefined here:\n{defined_here_code}"
+        if self.cause:
+            s += f"\n    Caused by: {str(self.cause).replace('\n', '\n    ')}"
+        return s
 
     def short_message(self) -> str:
         return self.message
@@ -105,16 +109,8 @@ def unexpected_token(span: Span, got: str, *expected: str) -> Error:
     return SimpleError(span, f"{prefix}{expected_names}, got `{got}`", _stack())
 
 
-def expected_at_least_one_if_case(span: Span) -> Error:
-    return SimpleError(span, "Expected at least one if case", _stack())
-
-
-def expected_assignment(got: str, span: Span) -> Error:
-    return SimpleError(span, f"Expected an assignment but got `{got}`", _stack())
-
-
-def expected_block_node(span: Span, token: str) -> Error:
-    return SimpleError(span, f"Expected a block node, got token `{token}`", _stack())
+def if_condition_must_not_contain_assigment(span: Span) -> Error:
+    return SimpleError(span, "If condition must not contain assignment", _stack())
 
 
 def expected_ident(expr: str, span: Span) -> Error:
@@ -130,10 +126,10 @@ def undefined_name(name: str, span: Span) -> Error:
 
 
 def no_member(name: str, target: str, span: Span, target_defined_here: Span) -> Error:
-    return WithDefinitionError(span, f"No member `{name}` in type `{target}`", target_defined_here, _stack())
+    return WithDefinitionError(span, f"No member `{name}` in type `{target}`", target_defined_here, None, _stack())
 
 
-def unexpected_type(expected: str, got: str, span: Span) -> Error:
+def unexpected_shape(expected: str, got: str, span: Span) -> Error:
     return SimpleError(span, f"Expected {expected}, got {got}", _stack())
 
 
@@ -141,109 +137,80 @@ def cascaded_error(cause: Error, span: Span) -> Error:
     return CascadedError(span, cause, _stack())
 
 
-def wrong_number_of_args(span: Span, params: int, args: int, defined_here: Span) -> Error:
-    return WithDefinitionError(span, f"Expected {params} arguments, got {args}", defined_here, _stack())
-
-
-def wrong_number_of_type_args(type_params: int, type_args: int, span: Span, defined_here: Span) -> Error:
-    return WithDefinitionError(
-        span,
-        f"Expected {type_params} type arguments, got {type_args}",
-        defined_here,
-        _stack(),
-    )
-
-
-def does_not_subsume(it: str, to: str, span: Span) -> Error:
-    return SimpleError(span, f"`{it}` does not conform to shape `{to}`", _stack())
+def does_not_conform_to(it: str, to: str, span: Span, defined_here: Span, cause: Error | None) -> Error:
+    return WithDefinitionError(span, f"`{it}` does not conform to shape `{to}`", defined_here, cause, _stack())
 
 
 def is_not_same(it: str, as_: str, span: Span) -> Error:
     return SimpleError(span, f"`{it}` is not the same shape as `{as_}`", _stack())
 
 
-def not_mutable(name: str, span: Span) -> Error:
-    return SimpleError(span, f"`{name}` is not mutable", _stack())
-
-
-def break_outside_loop(span: Span) -> Error:
-    return SimpleError(span, "`break` outside of a loop", _stack())
-
-
-def continue_outside_loop(span: Span) -> Error:
-    return SimpleError(span, "`continue` outside of a loop", _stack())
-
-
-def not_generic(span: Span, defined_here: Span) -> Error:
-    return WithDefinitionError(span, "Type is not generic", defined_here, _stack())
-
-
-def type_param_not_bound(name: str, span: Span) -> Error:
-    return SimpleError(span, f"Type parameter `{name}` is not bound to a trait", _stack())
-
-
-def invalid_type_param_bound(name: str, span: Span) -> Error:
-    return SimpleError(span, f"Invalid type parameter bound for type parameter `{name}`", _stack())
-
-
-def self_not_allowed_here(span: Span) -> Error:
-    return SimpleError(span, "`self` is not allowed here", _stack())
-
-
-def self_must_be_first_parameter(span: Span) -> Error:
-    return SimpleError(span, "`self` must be the first parameter", _stack())
-
-
 def not_callable(span: Span, defined_here: Span) -> Error:
-    return WithDefinitionError(span, "Only functions and structs can be called", defined_here, _stack())
-
-
-def not_declared_in_current_scope(name: str, span: Span) -> Error:
-    return SimpleError(span, f"`{name}` is not declared in the current scope", _stack())
-
-
-def trait_method_impl_missing(trait_name: str, method_name: str, trait_span: Span, span: Span) -> Error:
-    return WithDefinitionError(
-        span,
-        f"Missing implementation of trait method `{method_name}` in trait `{trait_name}`",
-        trait_span,
-        _stack(),
-    )
-
-
-def trait_method_impl_mismatch(trait_method_signature: str, impl_signature: str, trait_span: Span, span: Span) -> Error:
-    return WithDefinitionError(
-        span,
-        f"Method signature `{impl_signature}` does not match trait method signature `{trait_method_signature}`",
-        trait_span,
-        _stack(),
-    )
-
-
-def trait_qualifier_mismatch(
-    trait_signature: str,
-    existing_trait_signature: str,
-    target_fqn: str,
-    trait_span: Span,
-    span: Span,
-) -> Error:
-    return WithDefinitionError(
-        span,
-        f"Trait {trait_signature} has already been implemented for "
-        f"`{target_fqn}` with signature `{existing_trait_signature}`",
-        trait_span,
-        _stack(),
-    )
-
-
-def traits_cannot_implement_traits(span: Span) -> Error:
-    return SimpleError(span, "Traits cannot implement other traits", _stack())
-
-
-def return_outside_function(span: Span) -> Error:
-    return SimpleError(span, "`return` outside of a function", _stack())
+    return WithDefinitionError(span, "Only functions and structs can be called", defined_here, None, _stack())
 
 
 def invalid_main(span: Span) -> Error:
     # todo: How to specify the unit type?
     return SimpleError(span, "`main` must conform to the signature `main() -> None`", _stack())
+
+
+def cannot_add_method_to_interface_behaviour(behaviour: str, fun: str, span: Span) -> Error:
+    return SimpleError(span, f"Cannot add method `{fun}` to interface behaviour `{behaviour}`.", _stack())
+
+
+def cannot_add_interface_method_to_non_interface_behaviour(behaviour: str, fun: str, span: Span) -> Error:
+    return SimpleError(span, f"Cannot add interface method `{fun}` to non-interface behaviour `{behaviour}`", _stack())
+
+
+def shape_is_not_a_variant(it: str, sum_shape: str, span: Span, defined_here: Span) -> Error:
+    return WithDefinitionError(span, f"`{it}` is not a variant of `{sum_shape}`", defined_here, None, _stack())
+
+
+def field_not_found(name: str, span: Span, defined_here: Span) -> Error:
+    return WithDefinitionError(span, f"Field `{name}` not found", defined_here, None, _stack())
+
+
+def variant_not_found(variant: str, span: Span, defined_here: Span) -> Error:
+    return WithDefinitionError(span, f"Variant `{variant}` not found", defined_here, None, _stack())
+
+
+def function_result_does_not_conform(self_fun: str, other_fun: str, self_span: Span, other_span: Span) -> Error:
+    return WithDefinitionError(
+        self_span, f"Function result `{self_fun}` does not conform to `{other_fun}`", other_span, None, _stack()
+    )
+
+
+def wrong_number_of_parameters(self_fun: str, other_fun: str, self_span: Span, other_span: Span) -> Error:
+    return WithDefinitionError(
+        self_span,
+        f"Wrong number of parameters for function `{self_fun}` compared to `{other_fun}`",
+        other_span,
+        None,
+        _stack(),
+    )
+
+
+def failed_to_specialize(specialized: str, base: str, self_span: Span, other_span: Span, error: Error) -> Error:
+    return WithDefinitionError(
+        self_span,
+        f"`{base}` cannot be called as `{specialized}`",
+        other_span,
+        error,
+        _stack(),
+    )
+
+
+def sum_shapes_cannot_be_used_in_a_compound_shape(span: Span) -> Error:
+    return SimpleError(span, "Sum shapes cannot be used in a compound shape", _stack())
+
+
+def fun_shapes_cannot_have_behaviours(span: Span) -> Error:
+    return SimpleError(span, "Function shapes cannot have behaviours", _stack())
+
+
+def fun_shapes_cannot_be_used_in_a_compound_shape(span: Span) -> Error:
+    return SimpleError(span, "Function shapes cannot be used in a compound shape", _stack())
+
+
+def list_shapes_cannot_be_used_in_a_compound_shape(span: Span) -> Error:
+    return SimpleError(span, "List shapes cannot be used in a compound shape", _stack())

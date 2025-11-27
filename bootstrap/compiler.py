@@ -12,6 +12,7 @@ from . import (
     error,
     gogen,
     ir,
+    ir_optimize,
     parser,
     token,
     types,
@@ -61,7 +62,7 @@ class TypecheckStep:
         lines = []
 
         def visit(node: ast.Node, _parent: ast.Node | None) -> ast.Node:
-            typ = self.result.type_env.node_types.get(node.id)
+            typ = self.result.type_env.node_shapes.get(node.id)
             typ_str = str(typ) if typ else "NOT_FOUND"
             node_str = ast.to_str_withoud_nid(node)
             code_str = node.span.lines(0)[1][0].strip()
@@ -152,6 +153,7 @@ def compile(input: token.Input, outfile: str) -> Generator[CompilationStep]:  # 
         return
     start = time()
     ir_ = ir.generate_ir(tc_result.fun_specs)
+    ir_ = ir_optimize.remove_unused(ir_)
     yield IRStep(ir_, time() - start)
     start = time()
     code = gogen.gogen(ir_)

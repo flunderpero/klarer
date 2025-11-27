@@ -8,10 +8,9 @@ Value = str | None
 
 
 class Kind(Enum):
-    behaviour_ns = "behaviour ns"
-    bind = "bind"
-    braket_left = "["
-    braket_right = "]"
+    behaviour_ident = "behaviour identifier"
+    bracket_left = "["
+    bracket_right = "]"
     case = "case"
     char_lit = "char literal"
     colon = ":"
@@ -31,15 +30,15 @@ class Kind(Enum):
     ident = "identifier"
     if_ = "if"
     int_lit = "int literal"
-    loop = "loop"
     lt = "<"
     minus = "-"
-    mut = "mut"
     neq = "!="
     paren_left = "("
     paren_right = ")"
     pipe = "|"
     plus = "+"
+    slash = "/"
+    star = "*"
     str_lit = "str literal"
     true = "true"
     type_ident = "type identifier"
@@ -70,15 +69,12 @@ class Token:
 keywords = {
     x.value: x
     for x in (
-        Kind.bind,
         Kind.case,
         Kind.else_,
         Kind.end,
         Kind.false,
         Kind.fun,
         Kind.if_,
-        Kind.loop,
-        Kind.mut,
         Kind.true,
     )
 }
@@ -129,15 +125,19 @@ def tokenize(input: Input) -> tuple[list[Token], list[error.Error]]:
             case "}":
                 kind = Kind.curly_right
             case "[":
-                kind = Kind.braket_left
+                kind = Kind.bracket_left
             case "]":
-                kind = Kind.braket_right
+                kind = Kind.bracket_right
             case ".":
                 kind = Kind.dot
             case ",":
                 kind = Kind.comma
             case "+":
                 kind = Kind.plus
+            case "*":
+                kind = Kind.star
+            case "/":
+                kind = Kind.slash
             case "<":
                 kind = Kind.lt
             case ">":
@@ -201,6 +201,12 @@ def tokenize(input: Input) -> tuple[list[Token], list[error.Error]]:
                     continue
                 input.next()
                 kind = Kind.char_lit
+            case "@":
+                kind = Kind.behaviour_ident
+                value = str(c)
+                while ((c := input.peek()).isalnum() and c.isascii()) or c == "_":
+                    input.next()
+                    value += c
             case c if c.isnumeric():
                 # Int
                 value = c
@@ -208,7 +214,7 @@ def tokenize(input: Input) -> tuple[list[Token], list[error.Error]]:
                     input.next()
                     value += c
                 kind = Kind.int_lit
-            case c if c.isalpha() and c.isascii():
+            case c if c.isalpha():
                 # Identifier or type identifier
                 kind = Kind.ident if c.islower() else Kind.type_ident
                 value = c
@@ -219,12 +225,6 @@ def tokenize(input: Input) -> tuple[list[Token], list[error.Error]]:
                 if keyword:
                     kind = keyword
                     value = None
-            case "@":
-                kind = Kind.behaviour_ns
-                value = ""
-                while ((c := input.peek()).isalnum() and c.isascii()) or c == "_":
-                    input.next()
-                    value += c
             case _:
                 errors.append(error.unknown_token(span, c))
                 continue

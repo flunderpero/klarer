@@ -3,7 +3,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
-LogTopic = Literal["parser-trace", "typechecker-trace", "typechecker-mono", "typechecker-infer", "ir-trace"]
+LogTopic = Literal[
+    "parser-trace",
+    "typechecker-trace",
+    "typechecker-mono",
+    "typechecker-infer",
+    "ir-trace",
+    "ir-optimize-remove-unused",
+]
 
 log_topics: set[LogTopic] = set()
 

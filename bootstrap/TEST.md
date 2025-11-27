@@ -35,20 +35,64 @@ end
 PASS
 ```
 
+**Default behaviours**
+
+```klarer
+main = fun():
+    print("PASS".to_str())
+end
+```
+
+```
+PASS
+```
+
 ### Boolean
 
 ```klarer
 main = fun():
     t = true
-    f = false
-    print(bool_to_str(t))
-    print(bool_to_str(f))
+    print(t)
+    print(false)
 end
 ```
 
 ```
 true
 false
+```
+
+**Default behaviours**
+
+```klarer
+main = fun():
+    b = true
+    print(b.to_str())
+    print(false.to_str())
+end
+```
+
+```
+true
+false
+```
+
+#### Boolean Expressions
+
+```klarer
+main = fun():
+    print(1 == 2)
+    print(1 == 1)
+    print(2 != 2)
+    print(1 != 2)
+end
+```
+
+```
+false
+true
+false
+true
 ```
 
 ### Int
@@ -59,8 +103,8 @@ For now, we only support `Int` which is a 64-bit signed integer.
 main = fun():
     a = 42
     b = -42
-    print(int_to_str(a))
-    print(int_to_str(b))
+    print(a)
+    print(b)
 end
 ```
 
@@ -69,14 +113,29 @@ end
 -42
 ```
 
+**Default behaviours**
+
+```klarer
+main = fun():
+    i = 42
+    print(i.to_str())
+    print(137.to_str())
+end
+```
+
+```
+42
+137
+```
+
 **Minimum and maximum values**
 
 ```klarer
 main = fun():
     a = 9223372036854775807
     b = -9223372036854775808
-    print(int_to_str(a))
-    print(int_to_str(b))
+    print(a)
+    print(b)
 end
 ```
 
@@ -85,12 +144,37 @@ end
 -9223372036854775808
 ```
 
+#### Arithmetic Expressions
+
+```klarer
+main = fun():
+    a = 40 + 2
+    print(a)
+
+    b = 140 - 3
+    print(b)
+
+    c = 3 * 4
+    print(c)
+
+    d = 5 / 2
+    print(d)
+end
+```
+
+```
+42
+137
+12
+2
+```
+
 ### Char
 
 ```klarer
 main = fun():
     a = 'a'
-    print(char_to_str(a))
+    print(a)
 end
 ```
 
@@ -98,7 +182,264 @@ end
 a
 ```
 
-### If Expressions
+**Default behaviours**
+
+```klarer
+main = fun():
+    c = 'P'
+    print(c.to_str())
+    print('A'.to_str())
+end
+```
+
+```
+P
+A
+```
+
+### Lists
+
+```klarer
+
+Strings = {values [Str]}
+
+main = fun():
+    a = Strings{values = ["FAIL", "PASS"]}
+    print(a.values[1])
+end
+```
+
+```
+PASS
+```
+
+**Lists of product shapes**
+
+```klarer
+
+Person = {name Str, age Int}
+
+main = fun():
+    list = [Person{name = "John", age = 42}, Person{name = "Jane", age = 24}]
+    print(list[0].name)
+    print(list[1].name)
+end
+```
+
+```
+John
+Jane
+```
+
+**Lists of Int**
+
+```klarer
+
+main = fun():
+    list = [42, 137]
+    print(list[0])
+    print(list[1])
+end
+```
+
+```
+42
+137
+```
+
+**List of mixed shapes**
+
+> [!TODO]
+> We don't support sum shapes yet.
+
+```todo
+
+main = fun():
+    list = []
+    list = list + ["PASS"]
+    -- `list` is `[Str]` here.
+    print(list[0])
+
+    list = list + [42]
+    -- `list` is `[Str | Int]` here, that's why we have to `match`.
+    match list[0]:
+        case Str:
+            print(list[0])
+        case _:
+            print("FAIL")
+    end
+    match list[1]:
+        case Int:
+            print(list[1])
+        case _:
+            print("FAIL")
+    end
+end
+
+```
+
+```
+PASS
+42
+```
+
+#### List Operations
+
+**Concatenating lists**
+
+```klarer
+main = fun():
+    a = ["P", "A"]
+    b = ["S"]
+    c = a + ["S"] + b
+    print(c[0])
+    print(c[1])
+    print(c[2])
+    print(c[3])
+end
+```
+
+```
+P
+A
+S
+S
+```
+
+## Product Shapes
+
+```klarer
+
+main = fun():
+    v = {value = "PASS"}
+    print(v.value)
+end
+```
+
+```
+PASS
+```
+
+**Compound product shapes with shape aliases**
+
+```klarer
+
+Person = {name Str, age Int}
+PersonWithCity = Person + {city Str}
+
+main = fun():
+    v = PersonWithCity{name = "John", age = 42, city = "Berlin"}
+    print(v.name)
+    print(v.city)
+end
+```
+
+```
+John
+Berlin
+```
+
+### Product Shape Literals
+
+**Compound product shape literals**
+
+```klarer
+Person = {name Str, age Int}
+
+main = fun():
+    v = {name = "John", age = 42} + {city = "Berlin"}
+    print(v.name)
+    print(v.city)
+end
+```
+
+```
+John
+Berlin
+```
+
+**Using a shape alias verifies the literal conforms to the shape alias**
+
+```klarer
+Person = {name Str, age Int}
+
+main = fun():
+    p = Person{name = "John"} -- ERROR: `{name Str}` does not conform to shape `Person`
+end
+```
+
+## Sum Shapes
+
+```klarer
+
+Shape = Int | {value Str} | fun(s Str) Int
+
+-- This function effectively asserts that `v` conforms to the shape `Shape`.
+assert_shape = fun(v Shape) Shape:
+    v
+end
+
+the_answer = fun(s Str) Int:
+    42
+end
+
+main = fun():
+    print(assert_shape(137))
+    print(assert_shape({value = "PASS"}).value)
+    print(assert_shape(the_answer)("Life, the universe, and everything"))
+end
+
+```
+
+```
+137
+PASS
+42
+```
+
+**Compound shapes that are part of a sum shape cannot be created with the sum shape name**
+
+```klarer
+Shape = Int | {value Str} | fun(a Str) Int
+
+main = fun():
+    v = Shape{value = "FAIL"} -- ERROR: Expected a product shape, got Shape(Int | {value Str} | fun(a Str) -> Int)
+end
+```
+
+**Sum shapes and compound shapes with behaviours**
+
+```klarer
+Shape = Int | {value Str} + {extra Int} + @PrintValue | Str
+
+@PrintValue.print_value = fun(v {value Str, extra Int}):
+    print(v.value)
+    print(v.extra)
+end
+
+-- This function effectively asserts that `v` conforms to the shape `Shape`.
+assert_shape = fun(v Shape) Shape:
+    v
+end
+
+main = fun():
+    v = {value = "PASS1", extra = 42} + @PrintValue
+    assert_shape(v).print_value()
+
+    print(assert_shape(137))
+
+    print(assert_shape("PASS2"))
+end
+```
+
+```
+PASS1
+42
+137
+PASS2
+```
+
+## If Expressions
 
 ```klarer
 main = fun():
@@ -139,34 +480,6 @@ else is taken:
 PASS
 ```
 
-**Mutating variables that are defined outside the if**
-
-```klarer
-main = fun():
-    mut pass = "FAIL"
-    mut num = 42
-
-    if
-        case false:
-            pass = "FAIL!"
-            num = 0
-        case true:
-            pass = "PASS"
-        else:
-            pass = "FAIL!!"
-            num = 137
-    end
-
-    print(pass)
-    print(int_to_str(num))
-end
-```
-
-```
-PASS
-42
-```
-
 **Capturing the result of an if expression**
 
 ```klarer
@@ -191,46 +504,231 @@ main = fun():
 end
 ```
 
-## Mutability
+## Assignment
 
-### Mutable Variables
+**Shape assignment creates a copy**
 
 ```klarer
 main = fun():
-    mut s = "FAIL"
-    s = "PASS"
-    print(s)
+    a = {pass = "PASS"}
+    b = {b = "b", a = a}
+
+    print(a.pass)
+    print(b.a.pass)
 end
+```
+
+```
+PASS
+PASS
+```
+
+**Each assignment creates a new binding**
+
+```klarer
+main = fun():
+    a = 42
+    print(a)
+
+    a = "PASS"
+    print(a)
+
+    a = {name = "John", age = 42}
+    print(a.name)
+
+    a = {value = "PASS"}
+    print(a.value)
+end
+```
+
+```
+42
+PASS
+John
+PASS
+```
+
+**Assignments are local to the scope they are created in.**
+
+```klarer
+main = fun():
+    a = "PASS1"
+    print(a)
+
+    if case true:
+        a = "PASS2"
+        print(a)
+    end
+
+    print(a)
+end
+```
+
+```
+PASS1
+PASS2
+PASS1
+```
+
+## Functions
+
+### Functions as Values
+
+**A function can be passed to another function**
+
+```klarer
+
+print_me = fun(v {}, f fun(v {}) {}):
+    print(f(v))
+end
+
+id = fun(v {}) {}: v end
+
+main = fun():
+    print_me("PASS", id)
+end
+
 ```
 
 ```
 PASS
 ```
 
-**Mutable variables must be marked with `mut`**
-
-```klarer
-main = fun():
-    s = "FAIL"
-    s = "PASS" -- ERROR: `s` is not mutable
-end
-```
-
-### Mutable Function Parameters
+**Pass a function multiple times**
 
 > [!TODO]
-> We need to actually mark the function parameter as mutable.
-> For now, all non-primitive parameters are just mutable.
+> The way we defunctionalize functions is not correct. This code does not compile.
+
+```todo
+
+print_me = fun(v {}, f fun(v {}) {}):
+    print(f(v))
+end
+
+id = fun(v {}) {}: v end
+
+main = fun():
+    print_me("PASS", id(id))
+end
+
+```
+
+```
+PASS
+```
+
+**A function can be returned from a block**
 
 ```klarer
-f = fun(v):
-    v.value = "PASS"
+
+the_answer = fun(s Str) Int:
+    42
+end
+
+six_times_nine = fun(s Str) Int:
+    54 -- This is actually incorrect, but we need a different number for the test. :)
 end
 
 main = fun():
-    mut v = {value = "FAIL"}
-    f(v)
+    f = if case true:
+        the_answer
+    else:
+        six_times_nine
+    end
+    print(f("What is it?"))
+
+    -- Now choose the else branch.
+    f = if case false:
+        the_answer
+    else:
+        six_times_nine
+    end
+    print(f("What is it?"))
+end
+
+```
+
+```
+42
+54
+```
+
+**A function can be stored in a product shape**
+
+```klarer
+
+the_answer = fun(s Str) Int:
+    42
+end
+
+main = fun():
+    shape = {f = the_answer}
+    print(shape.f("Life, the universe, and everything"))
+
+    f = shape.f
+    print(f("Life, the universe, and everything"))
+end
+
+```
+
+```
+42
+42
+```
+
+```klarer
+
+Shape = {f fun(s Str) Int}
+
+the_answer = fun(s Str) Int:
+    42
+end
+
+main = fun():
+    shape = Shape{f = the_answer}
+    print(shape.f("Life, the universe, and everything"))
+end
+
+```
+
+```
+42
+```
+
+**A function can be stored in a list shape**
+
+```klarer
+
+the_answer = fun(s Str) Int:
+    42
+end
+
+six_times_nine = fun(s Str) Int:
+    54 -- This is actually incorrect, but we need a different number for the test. :)
+end
+
+main = fun():
+    shape = [the_answer, six_times_nine]
+    print(shape[0]("Life, the universe, and everything"))
+    print(shape[1]("What is six times nine?"))
+end
+```
+
+```
+42
+54
+```
+
+## Behaviour
+
+```klarer
+@Value.print_value = fun(v {value Str}):
     print(v.value)
+end
+
+main = fun():
+    v = {value = "PASS"} + @Value
+    v.print_value()
 end
 ```
 
@@ -238,16 +736,318 @@ end
 PASS
 ```
 
-## Shape Inference
-
-**Infer based on property access**
+**A shape literal should receive the behaviours of a shape alias**
 
 ```klarer
-deeply_nested = fun(o):
-    o.deeply.nested = 42
+@Value.print_value = fun(v {value Str}):
+    print(v.value)
+end
+
+Value = {value {}} + @Value
+
+main = fun():
+    v = Value{value = "PASS"}
+    v.print_value()
+end
+```
+
+```
+PASS
+```
+
+### Interface Behaviours
+
+```klarer
+@MyToStr.to_str = fun(obj {}) Str
+
+@Value.to_str = fun(obj {value Str}) Str:
+    obj.value
+end
+
+Value = {value Str} + @Value
+
+print_my_to_str = fun(v {} + @MyToStr):
+    print(v.to_str())
 end
 
 main = fun():
-    v = deeply_nested({deeply = {nested = "FAIL"}}) -- ERROR: `fun deeply_nested(o {deeply {nested Str}}) -> Unit` does not conform to shape `fun deeply_nested(o {deeply {nested Int}}) -> Unit`
+    v = Value{value = "PASS"}
+    print_my_to_str(v)
 end
+```
+
+```
+PASS
+```
+
+**Interface implementations must match the interface at call-site**
+
+```klarer
+@MyToStr.my_to_str = fun(obj {}) Str
+
+-- Here we return an Int instead of a Str.
+@Value.my_to_str = fun(obj {value Str}) Int:
+    42
+end
+
+Value = {value Str} + @Value
+
+-- This function is only there to force an error if we try to call it with a non-Str.
+is_str = fun(v Str): end
+
+print_my_to_str = fun(v {} + @MyToStr):
+    is_str(v) -- This will error when we call `print_my_to_str` with `Value`.
+    print(v.my_to_str())
+end
+
+main = fun():
+    v = Value{value = "PASS"}
+    print_my_to_str(v) -- ERROR: `fun print_my_to_str(v {}) -> <unit>` cannot be called as `fun print_my_to_str(v Value{value Str}) -> <unit>`
+end
+```
+
+**You cannot mix interface methods with non-interface methods in the same behaviour**
+
+```klarer
+@Value.foo = fun(): end
+
+@Value.bar = fun() Str -- ERROR: Cannot add interface method `fun @Value.bar() -> Str` to non-interface behaviour `@Value`
+```
+
+```klarer
+@Value.bar = fun() Str
+
+@Value.foo = fun(): end -- ERROR: Cannot add method `fun @Value.foo() -> <unit>` to interface behaviour `@Value(interface)`.
+```
+
+#### Builtin Interface Behaviours
+
+> [!TODO]
+> We need to implement `print` in Klarer code so this will work.
+> Currently, `print` is a runtime function, so it does not force the
+> monomorphization to `print(obj Person)` to happen which would in turn
+> call `Person.to_str`.
+
+```todo
+Person = {name Str, age Int} + @Person
+
+@Person.to_str = fun(p Person) Str:
+    p.name
+end
+
+main = fun():
+    p = Person{name = "John", age = 42}
+    print(p)
+end
+```
+
+```
+John
+```
+
+## Forward Declarations
+
+**Functions are forward declared**
+
+```klarer
+
+main = fun():
+    print(pass("PASS"))
+end
+
+pass = fun(s Str) Str:
+    s
+end
+
+```
+
+```
+PASS
+```
+
+**Shape aliases are forward declared**
+
+```klarer
+
+main = fun():
+    p = Person{name = "John", age = 42}
+    print_person_name(p)
+end
+
+-- We use the forward declared `Person` as a parameter shape.
+print_person_name = fun(p Person):
+    p.print_name()
+end
+
+-- We use the forward declared `Person` as a parameter shape of a behaviour method.
+@Person.print_name = fun(p Person):
+    print(p.name)
+end
+
+Person = {name Str, age Int} + @Person
+```
+
+```
+John
+```
+
+**Forward declared shape aliases can be used in shape aliases**
+
+```klarer
+Container = {item Item, count Int}
+
+Item = {value Str}
+
+main = fun():
+    c = Container{item = Item{value = "PASS"}, count = 1}
+    print(c.item.value)
+end
+```
+
+```
+PASS
+```
+
+**Forward declared behaviours can be used in shape aliases and literals**
+
+```klarer
+
+main = fun():
+    p = Person{name = "John", age = 42}
+    p.print_name()
+
+    p = {name = "Jane", age = 24} + @Person
+    p.print_name()
+end
+
+Person = {name Str, age Int} + @Person
+
+@Person.print_name = fun(p Person):
+    print(p.name)
+end
+
+```
+
+```
+John
+Jane
+```
+
+**Composing with forward declared shape aliases**
+
+```klarer
+Combined = Base + {extra Int}
+
+Base = {value Str}
+
+main = fun():
+    c = Combined{value = "PASS", extra = 42}
+    print(c.value)
+end
+```
+
+```
+PASS
+```
+
+### Recursive Shapes
+
+**Declaring a recursive shape alias**
+
+> [!TODO]
+> Until we have sum types, we cannot create a literal for a recursive shape alias.
+> So for now, we just check that we can declare recursive shape aliases.
+
+```klarer
+
+Person = {name Str, age Int, parent Person}
+
+main = fun():
+end
+```
+
+**Declaring mutually recursive shape aliases**
+
+```klarer
+
+Address = {street Str, city Str, main Person}
+Person = {name Str, age Int, address Address}
+
+main = fun():
+end
+```
+
+## Monomorphization
+
+**Mutually recursive functions are monomorphized**
+
+```klarer
+foo = fun(n Int) Int:
+    if
+      case n == 0:
+        42
+      else:
+        bar(n - 1)
+    end
+end
+
+bar = fun(n Int) Int:
+    foo(n)
+end
+
+main = fun():
+    v = bar(2)
+    print(v)
+end
+```
+
+```
+42
+```
+
+**Same function shapes are only emitted once**
+
+```klarer
+
+id = fun(v {}) {}:
+    v
+end
+
+main = fun():
+    print(id(42))
+    print(id(137))
+end
+
+```
+
+```
+42
+137
+```
+
+## Code Generation
+
+**Make sure there are no unused variables when returning a function**
+
+We actually use static dispatch during IR and code generation if we know
+that the function is a named function. This might lead to unused variables
+in the generated Go code. This test checks that we can cope with that.
+
+```klarer
+
+question = fun() fun(s Str) Int:
+    the_answer
+end
+
+the_answer = fun(s Str) Int:
+    42
+end
+
+main = fun():
+    print(question()("Life, the universe, and everything"))
+end
+```
+
+```
+42
 ```

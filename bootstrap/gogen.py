@@ -7,9 +7,6 @@ from . import ir
 
 map_builtins = {
     "print": "Print",
-    "int_to_str": "IntToStr",
-    "bool_to_str": "BoolToStr",
-    "char_to_str": "CharToStr",
 }
 
 
@@ -42,18 +39,46 @@ class Code:
         self.newline()
 
 
-def typ(typ: ir.Typ) -> str:
-    match typ:
+def typ(ir_typ: ir.Typ) -> str:
+    match ir_typ:
         case ir.Int():
             return "int"
+        case ir.Char():
+            return "rune"
+        case ir.Bool():
+            return "bool"
+        case ir.Ptr():
+            # todo: unify the handling of struct pointers
+            ref = "*" if isinstance(ir_typ.typ, ir.Struct) else ""
+            return f"{ref}{typ(ir_typ.typ)}"
         case ir.Str():
             return "string"
         case ir.Struct():
-            return typ.fqn
+            return ir_typ.fqn
         case ir.NoneTyp():
             return "_"
+        case ir.Fun():
+            code = Code(0, [])
+            emit_fun_signature("", [ir.Reg(f"p{i}", x) for i, x in enumerate(ir_typ.params)], ir_typ.result, code)
+            return str(code)
+        case ir.List():
+            # todo: unify the handling of struct pointers
+            ref = "*" if isinstance(ir_typ.typ, ir.Struct) else ""
+            return f"[]{ref}{typ(ir_typ.typ)}"
         case _:
-            raise NotImplementedError(f"Unsupported type: {typ}")
+            raise NotImplementedError(f"Unsupported type: {ir_typ}")
+
+
+def emit_fun_signature(name: str, params: list[ir.Reg], result: ir.Typ, code: Code) -> None:
+    code.write(f"func {name}(")
+    for param in params:
+        ref = "*" if isinstance(param.typ, ir.Struct) else ""
+        code.write(f"{param} {ref}{typ(param.typ)}")
+        code.write(", ")
+    code.write(") ")
+    if not isinstance(result, ir.NoneTyp):
+        ref = "*" if isinstance(result, ir.Struct) else ""
+        code.write(f"{ref}{typ(result)} ")
 
 
 class FuncGen:
@@ -75,16 +100,12 @@ class FuncGen:
 
     def inst(self, inst: ir.Inst, code: Code) -> None:
         inst_reg = self.reg(inst.reg)
-        is_phi_reg = inst.reg.id != inst_reg.id
-        assign = ":="
-        if is_phi_reg:
-            assign = "="
         match inst:
             case ir.Alloc():
                 assert isinstance(inst_reg.typ, ir.Struct)
                 struct_name = inst_reg.typ.fqn
-                code.write(f"{inst_reg} {assign} &{struct_name}{{")
-                for i, arg_reg in enumerate(inst.args):
+                code.write(f"{inst_reg} = &{struct_name}{{")
+                for i, arg_reg in enumerate(inst.args_):
                     if i > 0:
                         code.write(", ")
                     code.write(f"_{i}: {self.reg(arg_reg)}")
@@ -95,34 +116,85 @@ class FuncGen:
                 if isinstance(callee, str) and callee in map_builtins:
                     callee = map_builtins[callee]
                 if inst_reg != ir.NoneReg:
-                    code.write(f"{inst_reg} {assign} ")
+                    code.write(f"{inst_reg} = ")
                 code.write(f"{callee}(")
-                code.writeln(", ".join(f"{self.reg(arg)}" for arg in inst.args) + ")")
+                code.writeln(", ".join(f"{self.reg(arg)}" for arg in inst.args_) + ")")
             case ir.GetPtr():
                 self.getptrs[inst_reg] = inst
                 src_reg = self.reg(inst.src)
                 if isinstance(inst.src.typ, ir.Struct):
-                    code.write(f"{inst_reg} {assign} {src_reg}._{inst.field}")
+                    code.write(f"{inst_reg} = {src_reg}._{inst.field}")
                 else:
-                    code.write(f"{inst_reg} {assign} {src_reg}")
-                if not is_phi_reg:
-                    # todo: This is a hack because we shouldn't emit the code above
-                    #       if the result is used in a `Store` only.
-                    #       `Store` accesses `self.getptrs` because we cannot have
-                    #       pointers to struct fields in Go.
-                    code.write(f"; _ = {inst_reg}")
+                    code.write(f"{inst_reg} = {src_reg}")
                 code.newline()
+            case ir.GetFunPtr():
+                code.writeln(f"{inst_reg} = {inst.src.fqn}")
             case ir.IntConst():
-                code.writeln(f"{inst_reg} {assign} {inst.value}")
+                match inst.reg.typ:
+                    case ir.Int():
+                        code.writeln(f"{inst_reg} = {inst.value}")
+                    case ir.Char():
+                        code.writeln(f"{inst_reg} = {inst.value}")
+                    case ir.Bool():
+                        value = "true" if inst.value else "false"
+                        code.writeln(f"{inst_reg} = {value}")
+                    case _:
+                        raise AssertionError(f"Unexpected type: {inst.reg.typ}")
+            case ir.ListConst():
+                assert isinstance(inst.reg.typ, ir.List)
+                # todo: unify the handling of struct pointers
+                ref = "*" if isinstance(inst.reg.typ.typ, ir.Struct) else ""
+                code.write(f"{inst_reg} = []{ref}{typ(inst.reg.typ.typ)}{{")
+                for i, value_reg in enumerate(inst.values):
+                    if i > 0:
+                        code.write(", ")
+                    code.write(f"{self.reg(value_reg)}")
+                code.writeln("}")
+            case ir.ListConcat():
+                lhs_reg = self.reg(inst.lhs)
+                rhs_reg = self.reg(inst.rhs)
+                code.writeln(f"{inst_reg} = append({lhs_reg}, {rhs_reg}...)")
+            case ir.GetListPtr():
+                src_reg = self.reg(inst.src)
+                index_reg = self.reg(inst.index)
+                code.writeln(f"{inst_reg} = {src_reg}[{index_reg}]")
             case ir.Load():
                 src_reg = self.reg(inst.src)
-                code.writeln(f"{inst_reg} {assign} {src_reg}")
+                code.writeln(f"{inst_reg} = {src_reg}")
             case ir.Store():
                 # inst.target has to be a GetPtr we have already seen.
                 target_reg = self.reg(inst.target)
                 getptr = self.getptrs[target_reg]
                 getptr_src_reg = self.reg(getptr.src)
                 code.writeln(f"{getptr_src_reg}._{getptr.field} = {inst.src}")
+            case ir.IAddO():
+                lhs_reg = self.reg(inst.lhs)
+                rhs_reg = self.reg(inst.rhs)
+                code.writeln(f"{inst_reg} = {lhs_reg} + {rhs_reg}")
+            case ir.ISubO():
+                lhs_reg = self.reg(inst.lhs)
+                rhs_reg = self.reg(inst.rhs)
+                code.writeln(f"{inst_reg} = {lhs_reg} - {rhs_reg}")
+            case ir.IMulO():
+                lhs_reg = self.reg(inst.lhs)
+                rhs_reg = self.reg(inst.rhs)
+                code.writeln(f"{inst_reg} = {lhs_reg} * {rhs_reg}")
+            case ir.IDivO():
+                lhs_reg = self.reg(inst.lhs)
+                rhs_reg = self.reg(inst.rhs)
+                code.writeln(f"{inst_reg} = {lhs_reg} / {rhs_reg}")
+            case ir.ICmp():
+                lhs_reg = self.reg(inst.lhs)
+                rhs_reg = self.reg(inst.rhs)
+                op = None
+                match inst.op:
+                    case ir.ICmpOp.eq:
+                        op = "=="
+                    case ir.ICmpOp.ne:
+                        op = "!="
+                    case _:
+                        raise NotImplementedError(f"TODO: ICmp {inst.op.value} {lhs_reg}, {rhs_reg}")
+                code.writeln(f"{inst_reg} = {lhs_reg} {op} {rhs_reg}")
             case ir.Phi():
                 pass
             case _:
@@ -141,7 +213,7 @@ class FuncGen:
                 else:
                     code.writeln(f"return {block.terminator.reg}")
             case ir.Branch():
-                code.writeln(f"if {block.terminator.reg} == 1 {{")
+                code.writeln(f"if {block.terminator.reg} {{")
                 # todo: optimize if we detect a simple if-else chain and are
                 #       sure that this is not a loop. In that case, we can
                 #       just simply create an `if` statement and generate the blocks.
@@ -160,27 +232,32 @@ class FuncGen:
         if len(self.fun_ir.blocks) > 1:
             code.dedent()
 
-    def handle_phi_nodes(self, code: Code) -> None:
+    def connect_phi_registers(self) -> None:
         for block in self.fun_ir.blocks:
             for inst in block.insts:
                 if isinstance(inst, ir.Phi):
-                    code.writeln(f"var {inst.reg} {typ(inst.reg.typ)}")
                     for phi_in in inst.incoming:
                         self.reg_map[phi_in.reg] = inst.reg
 
+    def declare_regs(self, code: Code) -> None:
+        for block in self.fun_ir.blocks:
+            for inst in block.insts:
+                reg = inst.reg
+                rtyp = reg.typ
+                if isinstance(rtyp, ir.NoneTyp):
+                    continue
+                if reg in self.reg_map:
+                    continue
+                ref = "*" if isinstance(rtyp, ir.Struct) else ""
+                code.writeln(f"var {reg} {ref}{typ(rtyp)}")
+
     def generate(self) -> str:
         code = Code(0, [])
-        code.write(f"func {self.fun_ir.fn_name}(")
-        for param in self.fun_ir.params:
-            ref = "*" if isinstance(param.typ, ir.Struct) else ""
-            code.write(f"{param.reg} {ref}{typ(param.typ)}")
-            code.write(", ")
-        code.write(") ")
-        if not isinstance(self.fun_ir.result, ir.NoneTyp):
-            code.write(f"{typ(self.fun_ir.result)} ")
+        emit_fun_signature(self.fun_ir.fn_name, self.fun_ir.params, self.fun_ir.result, code)
         code.writeln("{")
         code.indent()
-        self.handle_phi_nodes(code)
+        self.connect_phi_registers()
+        self.declare_regs(code)
         if len(self.fun_ir.blocks) > 1:
             code.writeln(f"block := {self.fun_ir.blocks[0].id}")
             code.writeln("for {")

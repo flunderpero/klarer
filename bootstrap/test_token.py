@@ -16,7 +16,7 @@ def test_token() -> None:
 
     42 "hello" 'c' true false
 
-    mut x = 42
+    x = 42
     """,
         )
     )
@@ -27,15 +27,15 @@ def test_token() -> None:
         (token.Kind.eq, None),
         (token.Kind.curly_left, None),
         (token.Kind.ident, "elements"),
-        (token.Kind.braket_left, None),
-        (token.Kind.braket_right, None),
+        (token.Kind.bracket_left, None),
+        (token.Kind.bracket_right, None),
         (token.Kind.curly_left, None),
         (token.Kind.curly_right, None),
         (token.Kind.comma, None),
         (token.Kind.ident, "index"),
         (token.Kind.type_ident, "Int"),
         (token.Kind.curly_right, None),
-        (token.Kind.behaviour_ns, "List"),
+        (token.Kind.behaviour_ident, "@List"),
         (token.Kind.dot, None),
         (token.Kind.ident, "new"),
         (token.Kind.eq, None),
@@ -49,7 +49,6 @@ def test_token() -> None:
         (token.Kind.char_lit, "c"),
         (token.Kind.true, None),
         (token.Kind.false, None),
-        (token.Kind.mut, None),
         (token.Kind.ident, "x"),
         (token.Kind.eq, None),
         (token.Kind.int_lit, "42"),

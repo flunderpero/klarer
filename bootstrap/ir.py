@@ -3,7 +3,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import Enum
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from . import ast, types
 from .span import log
@@ -19,6 +19,18 @@ class Int:
 
     def __str__(self) -> str:
         return f"I{self.bits}" if self.signed else f"U{self.bits}"
+
+
+@dataclass
+class Char:
+    def __str__(self) -> str:
+        return "Char"
+
+
+@dataclass
+class Bool:
+    def __str__(self) -> str:
+        return "Bool"
 
 
 @dataclass
@@ -49,6 +61,14 @@ class Fun:
 
 
 @dataclass
+class List:
+    typ: Typ
+
+    def __str__(self) -> str:
+        return f"[{self.typ}]"
+
+
+@dataclass
 class Ptr:
     typ: Typ
 
@@ -62,7 +82,7 @@ class NoneTyp:
         return "none"
 
 
-Typ = Int | Struct | Fun | Ptr | Str | NoneTyp
+Typ = Int | Char | Bool | Struct | Fun | Ptr | Str | NoneTyp | List
 
 
 I1 = Int(bits=1, signed=True)
@@ -74,7 +94,6 @@ I32 = Int(bits=32, signed=True)
 U32 = Int(bits=32, signed=False)
 I64 = Int(bits=64, signed=True)
 U64 = Int(bits=64, signed=False)
-Char = I64  # todo: Change it to U32 once we support int types other than I64
 
 RegId = str
 
@@ -105,8 +124,58 @@ class IntConst:
     def __str__(self) -> str:
         return f"{self.reg.id} = {self.value}"
 
-    def regs(self) -> list[Reg]:
-        return [self.reg]
+    def args(self) -> list[Reg]:
+        return []
+
+
+@dataclass
+class CharConst:
+    reg: Reg
+    value: int
+
+    def __str__(self) -> str:
+        return f"{self.reg.id} = {self.value}"
+
+    def args(self) -> list[Reg]:
+        return []
+
+
+@dataclass
+class ListConst:
+    reg: Reg
+    values: list[Reg]
+
+    def __str__(self) -> str:
+        return f"{self.reg.id} = {self.values}"
+
+    def args(self) -> list[Reg]:
+        return self.values
+
+
+@dataclass
+class ListConcat:
+    reg: Reg
+    lhs: Reg
+    rhs: Reg
+
+    def __str__(self) -> str:
+        return f"{self.reg} = concat {self.lhs.typ} {self.lhs}, {self.rhs.typ} {self.rhs}"
+
+    def args(self) -> list[Reg]:
+        return [self.lhs, self.rhs]
+
+
+@dataclass
+class GetListPtr:
+    reg: Reg
+    src: Reg
+    index: Reg
+
+    def __str__(self) -> str:
+        return f"{self.reg} = getlistptr {self.src.typ} {self.src}, {self.index.typ} {self.index}"
+
+    def args(self) -> list[Reg]:
+        return [self.src, self.index]
 
 
 @dataclass
@@ -118,20 +187,20 @@ class GetPtr:
     def __str__(self) -> str:
         return f"{self.reg} = getptr {self.src.typ} {self.src}, {self.reg.typ}, {self.field}"
 
-    def regs(self) -> list[Reg]:
-        return [self.reg, self.src]
+    def args(self) -> list[Reg]:
+        return [self.src]
 
 
 @dataclass
-class GetFnPtr:
+class GetFunPtr:
     reg: Reg
     src: Fun
 
     def __str__(self) -> str:
         return f"{self.reg} = getfnptr {self.src.fqn}, {self.reg.typ}"
 
-    def regs(self) -> list[Reg]:
-        return [self.reg]
+    def args(self) -> list[Reg]:
+        return []
 
 
 @dataclass
@@ -142,8 +211,8 @@ class Load:
     def __str__(self) -> str:
         return f"{self.reg} = load {self.src.typ} {self.src}"
 
-    def regs(self) -> list[Reg]:
-        return [self.reg, self.src]
+    def args(self) -> list[Reg]:
+        return [self.src]
 
 
 @dataclass
@@ -159,7 +228,7 @@ class Store:
         """A store instruction does not create a new register."""
         return NoneReg
 
-    def regs(self) -> list[Reg]:
+    def args(self) -> list[Reg]:
         return [self.target, self.src]
 
 
@@ -167,33 +236,32 @@ class Store:
 class Call:
     reg: Reg
     callee: str | Reg
-    args: list[Reg]
+    args_: list[Reg]
 
     def __str__(self) -> str:
         prefix = f"{self.reg} = call {self.reg.typ}" if self.reg != NoneReg else "call none"
         s = f"{prefix} {self.callee}"
         if self.args:
-            s += f", {', '.join(f'{x.typ} {x.id}' for x in self.args)}"
+            s += f", {', '.join(f'{x.typ} {x.id}' for x in self.args_)}"
         return s
 
-    def regs(self) -> list[Reg]:
-        regs = list(self.args)
-        regs.append(self.reg)
+    def args(self) -> list[Reg]:
+        args = list(self.args_)
         if isinstance(self.callee, Reg):
-            regs.append(self.callee)
-        return regs
+            args.append(self.callee)
+        return args
 
 
 @dataclass
 class Alloc:
     reg: Reg
-    args: list[Reg]
+    args_: list[Reg]
 
     def __str__(self) -> str:
-        return f"{self.reg.id} = alloc {self.reg.typ}, {', '.join(f'{x.typ} {x.id}' for x in self.args)}"
+        return f"{self.reg.id} = alloc {self.reg.typ}, {', '.join(f'{x.typ} {x.id}' for x in self.args_)}"
 
-    def regs(self) -> list[Reg]:
-        return [self.reg, *self.args]
+    def args(self) -> list[Reg]:
+        return self.args_
 
 
 @dataclass
@@ -207,8 +275,8 @@ class IAddO:
     def __str__(self) -> str:
         return f"{self.reg} = iaddo {self.lhs.typ} {self.lhs}, {self.rhs.typ} {self.rhs}"
 
-    def regs(self) -> list[Reg]:
-        return [self.reg, self.lhs, self.rhs]
+    def args(self) -> list[Reg]:
+        return [self.lhs, self.rhs]
 
 
 @dataclass
@@ -222,8 +290,38 @@ class ISubO:
     def __str__(self) -> str:
         return f"{self.reg} = isubo {self.lhs.typ} {self.lhs}, {self.rhs.typ} {self.rhs}"
 
-    def regs(self) -> list[Reg]:
-        return [self.reg, self.lhs, self.rhs]
+    def args(self) -> list[Reg]:
+        return [self.lhs, self.rhs]
+
+
+@dataclass
+class IMulO:
+    """Signed multiplication with overflow."""
+
+    reg: Reg
+    lhs: Reg
+    rhs: Reg
+
+    def __str__(self) -> str:
+        return f"{self.reg} = imulo {self.lhs.typ} {self.lhs}, {self.rhs.typ} {self.rhs}"
+
+    def args(self) -> list[Reg]:
+        return [self.lhs, self.rhs]
+
+
+@dataclass
+class IDivO:
+    """Signed division with overflow."""
+
+    reg: Reg
+    lhs: Reg
+    rhs: Reg
+
+    def __str__(self) -> str:
+        return f"{self.reg} = idivo {self.lhs.typ} {self.lhs}, {self.rhs.typ} {self.rhs}"
+
+    def args(self) -> list[Reg]:
+        return [self.lhs, self.rhs]
 
 
 class ICmpOp(Enum):
@@ -241,8 +339,8 @@ class ICmp:
     def __str__(self) -> str:
         return f"{self.reg} = icmp {self.op.value} {self.lhs.typ} {self.lhs}, {self.rhs.typ} {self.rhs}"
 
-    def regs(self) -> list[Reg]:
-        return [self.reg, self.lhs, self.rhs]
+    def args(self) -> list[Reg]:
+        return [self.lhs, self.rhs]
 
 
 @dataclass
@@ -262,11 +360,28 @@ class Phi:
     def __str__(self) -> str:
         return f"{self.reg} = phi {', '.join(str(reg) for reg in self.incoming)}"
 
-    def regs(self) -> list[Reg]:
-        return [x.reg for x in self.incoming] + [self.reg]
+    def args(self) -> list[Reg]:
+        return [x.reg for x in self.incoming]
 
 
-Inst = IntConst | GetPtr | GetFnPtr | Load | Store | Call | Alloc | IAddO | ISubO | ICmp | Phi
+Inst = (
+    IntConst
+    | ListConst
+    | ListConcat
+    | GetPtr
+    | GetListPtr
+    | GetFunPtr
+    | Load
+    | Store
+    | Call
+    | Alloc
+    | IAddO
+    | ISubO
+    | IMulO
+    | IDivO
+    | ICmp
+    | Phi
+)
 
 BlockId = int
 
@@ -297,7 +412,7 @@ class Branch:
     def successors(self) -> list[Block]:
         return [self.then_block, self.else_block]
 
-    def regs(self) -> list[Reg]:
+    def args(self) -> list[Reg]:
         return [self.reg]
 
 
@@ -311,7 +426,7 @@ class Jump:
     def successors(self) -> list[Block]:
         return [self.target]
 
-    def regs(self) -> list[Reg]:
+    def args(self) -> list[Reg]:
         return []
 
 
@@ -325,7 +440,7 @@ class Return:
     def successors(self) -> list[Block]:
         return []
 
-    def regs(self) -> list[Reg]:
+    def args(self) -> list[Reg]:
         return [self.reg]
 
 
@@ -336,6 +451,14 @@ Terminator = Branch | Jump | Return
 class StrConst:
     reg: Reg
     value: str
+
+    @staticmethod
+    def make_reg(i: int) -> Reg:
+        return Reg(f"s{i}", Str())
+
+    @staticmethod
+    def is_str_const(reg: Reg) -> bool:
+        return reg.id[0] == "s"
 
     def __str__(self) -> str:
         return f'{self.reg.id} = "{self.value}"'
@@ -359,45 +482,26 @@ class IR:
 
 
 @dataclass
-class Param:
-    reg: Reg
-    typ: Typ
-
-    def __str__(self) -> str:
-        return f"{self.typ} {self.reg.id}"
-
-
-@dataclass
 class Scope:
     parent: Scope | None
-    vars: dict[str, Reg]
+    names: dict[str, Reg]
 
-    def declare(self, name: str, reg: Reg) -> None:
-        assert name not in self.vars, f"Variable {name} already declared in scope"
-        self.vars[name] = reg
-
-    def update(self, name: str, reg: Reg) -> None:
-        if name in self.vars:
-            self.vars[name] = reg
-        elif self.parent:
-            self.parent.update(name, reg)
+    def bind(self, name: str, reg: Reg) -> None:
+        self.names[name] = reg
 
     def find(self, name: str) -> Reg | None:
-        res = self.vars.get(name)
+        res = self.names.get(name)
         if res:
             return res
         if self.parent:
             return self.parent.find(name)
         return None
 
-    def snapshot(self) -> dict[str, Reg]:
-        res = self.vars.copy()
+    def all_regs(self) -> list[Reg]:
+        res = list(self.names.values())
         if self.parent:
-            res.update(self.parent.snapshot())
+            res.extend(self.parent.all_regs())
         return res
-
-    def deep_copy(self) -> Scope:
-        return Scope(self.parent.deep_copy() if self.parent else None, self.vars.copy())
 
 
 @dataclass
@@ -410,7 +514,7 @@ class LoopScope:
 class FunIR:
     fn_def: ast.FunDef
     fn_name: str
-    params: list[Param]
+    params: list[Reg]
     result: Typ
     blocks: list[Block]
 
@@ -439,28 +543,25 @@ class FunGen:
         self.scope = Scope(None, {})
         fun_typ = spec.specialized
         fun_def = spec.fun_def
-        params: list[Param] = []
+        params: list[Reg] = []
         if spec.specialized.params:
             for param in spec.specialized.params:
-                typ = self.typ(param.typ)
+                typ = self.typ(param.shape)
                 reg = self.reg(typ)
-                self.scope.declare(param.name, reg)
-                params.append(Param(reg, typ))
+                self.scope.bind(param.name, reg)
+                params.append(reg)
         else:
             for p in fun_typ.params:
-                typ = self.typ(p.typ)
+                typ = self.typ(p.shape)
                 reg = self.reg(typ)
-                self.scope.declare(p.name, reg)
-                params.append(Param(reg, typ))
+                self.scope.bind(p.name, reg)
+                params.append(reg)
         result = self.typ(fun_typ.result)
         name = self.fun_name(fun_typ) if fun_def.name != "main" else "main"
         self.fun_ir = FunIR(fun_def, name, params, result, [])
         self.block = self.new_block()
 
-    def fun_name(self, fun: types.Fun) -> str:
-        if fun.builtin:
-            assert fun.name is not None
-            return fun.name
+    def fun_name(self, fun: types.FunShape) -> str:
         return fun.mangled_name()
 
     def new_block(self) -> Block:
@@ -476,38 +577,40 @@ class FunGen:
         yield
         self.scope = scope
 
-    def typ(self, typ: types.Typ) -> Typ:
-        match typ.typ:
-            case types.Primitive():
-                match typ.typ.name:
+    def typ(self, shape: types.Shape) -> Typ:
+        match shape:
+            case types.PrimitiveShape():
+                match shape.name:
                     case "Bool":
-                        return I1
+                        return Bool()
                     case "Char":
-                        return Char
+                        return Char()
                     case "Int":
                         return I64
                     case "Str":
                         return Str()
-                    case "Unit":
-                        return NoneTyp()
                     case _:
-                        raise AssertionError(f"Unsupported primitive type: {typ.typ.name}")
-            case types.Shape():
-                name = typ.mangled_name()
+                        raise AssertionError(f"Unsupported primitive type: {shape.name}")
+            case types.UnitShape():
+                return NoneTyp()
+            case types.ListShape():
+                return List(self.typ(shape.inner))
+            case types.ProductShape():
+                name = shape.mangled_name()
                 if existing := self.ir.structs.get(name):
                     return existing
-                struct = Struct(typ.mangled_name(), [self.typ(x.typ) for x in typ.typ.attrs_sorted])
+                struct = Struct(name, [self.typ(x.shape) for x in shape.fields_sorted])
                 self.ir.structs[name] = struct
                 return struct
-            case types.Fun():
+            case types.FunShape():
                 return Fun(
-                    typ.mangled_name(),
-                    [self.typ(x.typ) for x in typ.typ.params],
-                    self.typ(typ.typ.result),
+                    shape.mangled_name(),
+                    [self.typ(x.shape) for x in shape.params],
+                    self.typ(shape.result),
                     is_named=True,
                 )
             case _:
-                raise AssertionError(f"Unsupported type: {typ} ({typ.__class__})")
+                raise AssertionError(f"Unsupported type: {shape} ({shape.__class__})")
 
     def reg(self, typ: Typ, prefix: str = "_") -> Reg:
         if isinstance(typ, NoneTyp):
@@ -526,6 +629,7 @@ class FunGen:
             case ast.FunDef():
                 ast.walk(node, self.generate)
                 if self.block.terminator is None:
+                    assert node.body, f"Expected body for {node}"
                     reg = NoneReg if isinstance(self.fun_ir.result, NoneTyp) else self.node_regs[node.body.id]
                     self.block.terminator = Return(reg)
             case ast.Block():
@@ -535,36 +639,8 @@ class FunGen:
                     if node.nodes:
                         reg = self.node_regs[node.nodes[-1].id]
                     self.node_regs[node.id] = reg
-            case ast.Loop():
-                enter_scope_snapshot = self.scope.snapshot()
-                loop_block = self.new_block()
-                break_block = self.new_block()
-                self.loop_scopes.append(LoopScope(loop_block, break_block))
-                prev_block = self.block
-                self.block.terminator = Jump(loop_block)
-                self.block = loop_block
-                self.generate(node.block, node)
-                body_scope_snapshot = self.scope.snapshot()
-                # Insert phi nodes for every variable that has been changed in the loop body.
-                for name, enter_reg in enter_scope_snapshot.items():
-                    loop_reg = body_scope_snapshot[name]
-                    if enter_reg == loop_reg:
-                        continue
-                    reg = self.reg(enter_reg.typ)
-                    self.scope.update(name, reg)
-                    self.emit(Phi(reg, [PhiIn(enter_reg, prev_block), PhiIn(loop_reg, loop_block)]), None)
-                self.block.terminator = Jump(loop_block)
-                self.block = break_block
-                self.loop_scopes.pop()
-                self.node_regs[node.id] = NoneReg
             case ast.If():
                 log("ir-trace", f">>> if {node.span} ({len(node.arms)} arms, else: {node.else_block is not None})")
-                # Remember the current scope so we can emit phi nodes for every variable that
-                # escapes the `if` arms or every mutable variable accessed.
-                scope_copy = self.scope.deep_copy()
-                enter_scope_snapshot = self.scope.snapshot()
-                enter_block = self.block
-
                 # Add the else block to the list of arms to make the loop easier.
                 arms: list[tuple[ast.Expr | None, ast.Block, ast.Node]] = [(x.cond, x.block, x) for x in node.arms]
                 if node.else_block is not None:
@@ -573,7 +649,6 @@ class FunGen:
                 then_blocks = []
                 next_block = None
                 prev_block = self.block
-                scope_snapshots = []
                 for cond, block, arm_node in arms:
                     if cond is not None:
                         self.generate(cond, arm_node)
@@ -583,10 +658,7 @@ class FunGen:
                     self.block = then_block
                     then_blocks.append(then_block)
 
-                    # Restore the scope, generate the arm block, and take a snapshot of the scope.
-                    self.scope = scope_copy.deep_copy()
                     self.generate(block, arm_node)
-                    scope_snapshots.append(self.scope.snapshot())
 
                     # Create a new block that will take the condition of the next arm.
                     next_block = self.new_block()
@@ -604,26 +676,9 @@ class FunGen:
                 for then_block in then_blocks:
                     then_block.terminator = Jump(next_block)
 
-                # Restore the scope.
-                self.scope = scope_copy
-
-                # Insert phi nodes for every change of a mutable variable or new variable.
-                for name, enter_reg in enter_scope_snapshot.items():
-                    regs = [x[name] for x in scope_snapshots]
-                    phis = []
-                    for reg, block in zip(regs, then_blocks):
-                        if reg == enter_reg:
-                            continue
-                        phis.append(PhiIn(reg, block))
-                    if phis:
-                        phis.append(PhiIn(enter_reg, enter_block))
-                        reg = self.reg(enter_reg.typ)
-                        self.scope.update(name, reg)
-                        self.emit(Phi(reg, phis), None)
-
-                # Insert another phi node for the result of the whole if expression.
+                # Insert a phi node for the result of the whole if expression.
                 types_typ = self.type_env.get(node)
-                if not types_typ.is_unit():
+                if not isinstance(types_typ, types.UnitShape):
                     reg = self.reg(self.typ(types_typ))
                     phis = []
                     for arm, block in zip(arms, then_blocks):
@@ -636,28 +691,52 @@ class FunGen:
             case ast.StrLit():
                 const = self.ir.constant_pool.get(node.value)
                 if not const:
-                    reg = Reg(f"s{len(self.ir.constant_pool)}", Str())
+                    reg = StrConst.make_reg(len(self.ir.constant_pool))
                     const = StrConst(reg, node.value)
                     self.ir.constant_pool[node.value] = const
                 self.emit(GetPtr(reg=self.reg(Str()), src=const.reg), node)
             case ast.CharLit():
-                reg = self.reg(Char)
+                reg = self.reg(Char())
                 self.emit(IntConst(reg, value=ord(node.value)), node)
             case ast.IntLit():
                 reg = self.reg(I64)
                 self.emit(IntConst(reg, value=node.value), node)
             case ast.BoolLit():
-                reg = self.reg(I1)
+                reg = self.reg(Bool())
                 self.emit(IntConst(reg, value=int(node.value)), node)
-            case ast.ShapeLit():
+            case ast.ListLit():
                 ast.walk(node, self.generate)
-                # We need to sort the attributes by name because we did so in `typ()` when
+                values = [self.node_regs[x.id] for x in node.values]
+                typ = self.typ(self.type_env.get(node))
+                reg = self.reg(typ)
+                self.emit(ListConst(reg, values), node)
+            case ast.ListIndex():
+                ast.walk(node, self.generate)
+                src = self.node_regs[node.target.id]
+                typ = self.typ(self.type_env.get(node.target))
+                assert isinstance(src.typ, List), f"Expected List, got {src.typ}"
+                index = self.node_regs[node.index.id]
+                getptr_reg = self.reg(Ptr(src.typ.typ))
+                self.emit(GetListPtr(getptr_reg, src, index), None)
+                reg = self.reg(src.typ.typ)
+                self.emit(Load(reg, getptr_reg), node)
+            case ast.CompoundShapeLit():
+                # We need to accumulate and sort the fields by name because we did so in `typ()` when
                 # construction the struct type.
-                regs = [self.node_regs[x.id] for x in sorted(node.attrs, key=lambda x: x.name)]
+                fields = []
+                for shape_node in node.shapes:
+                    fields.extend(shape_node.fields)
+                sorted_fields = sorted(fields, key=lambda x: x.name)
+                regs: list[Any] = [None] * len(sorted_fields)
+                for shape_node in node.shapes:
+                    for field in shape_node.fields:
+                        i = sorted_fields.index(field)
+                        self.generate(field, shape_node)
+                        regs[i] = self.node_regs[field.id]
                 typ = self.typ(self.type_env.get(node))
                 reg = self.reg(typ)
                 self.emit(Alloc(reg, regs), node)
-            case ast.ShapeLitAttr():
+            case ast.ShapeLitField():
                 ast.walk(node, self.generate)
                 reg = self.node_regs[node.value.id]
                 self.node_regs[node.id] = reg
@@ -666,46 +745,75 @@ class FunGen:
                 if reg:
                     self.node_regs[node.id] = reg
                     return node
+                shape = self.type_env.get(node)
+                if not isinstance(shape, types.FunShape):
+                    return node
                 # If this node is the callee of a call node then we don't want
-                # to emit a GetFnPtr for named functions.
+                # to emit a GetFunPtr.
                 if isinstance(parent, ast.Call) and parent.callee == node:
+                    assert shape.is_named, f"Expected named function, got {shape}"
                     return node
-                ir_typ = self.type_env.get(node)
-                if not isinstance(ir_typ, types.Fun) or not ir_typ.is_named:
+                if not shape.is_named:
                     return node
-                # Emit a GetFnPtr if the identifier refers to a named function.
-                getptr_reg = self.reg(Ptr(self.typ(ir_typ)))
-                fn_typ = self.typ(ir_typ)
-                assert isinstance(fn_typ, Fun), f"Expected Fn, got {fn_typ}"
-                self.emit(GetFnPtr(getptr_reg, fn_typ), None)
+                # Emit a GetFunPtr if the identifier refers to a named function.
+                getptr_reg = self.reg(Ptr(self.typ(shape)))
+                fun_typ = self.typ(shape)
+                assert isinstance(fun_typ, Fun), f"Expected Fun, got {fun_typ}"
+                self.emit(GetFunPtr(getptr_reg, fun_typ), None)
                 self.node_regs[node.id] = getptr_reg
             case ast.Member():
                 ast.walk(node, self.generate)
                 src = self.node_regs[node.target.id]
-                types_src = self.type_env.get(node.target)
-                assert isinstance(src.typ, Struct), f"Expected Struct, got {src.typ}"
-                assert isinstance(types_src.typ, types.Shape), f"Expected Shape, got {types_src}"
-                attr_index = types_src.typ.attrs_sorted.index(types_src.typ.attr(node.name))
-                assert attr_index is not None, f"No member {node.name} in type {types_src}"
-                getptr_reg = self.reg(Ptr(src.typ.fields[attr_index]))
-                if isinstance(parent, ast.Assign):
-                    self.emit(GetPtr(getptr_reg, src, attr_index), node)
-                else:
-                    self.emit(GetPtr(getptr_reg, src, attr_index), None)
-                    reg = self.reg(src.typ.fields[attr_index])
-                    self.emit(Load(reg, getptr_reg), node)
+                src_shape = self.type_env.get(node.target)
+                if isinstance(src.typ, Struct):
+                    assert isinstance(src_shape, types.ProductShape), f"Expected Shape, got {src_shape}"
+                    field = src_shape.field(node.name)
+                    if field is not None:
+                        field_index = src_shape.fields_sorted.index(field)
+                        assert field_index is not None, f"No member {node.name} in type {src_shape}"
+                        getptr_reg = self.reg(Ptr(src.typ.fields[field_index]))
+                        if isinstance(parent, ast.Assign):
+                            self.emit(GetPtr(getptr_reg, src, field_index), node)
+                        elif (
+                            isinstance(parent, ast.Call)
+                            and parent.callee == node
+                            and isinstance(field.shape, types.FunShape)
+                            and field.shape.is_named
+                        ):
+                            # We don't emit a GetPtr and Load if the parent is a call
+                            # and the function is named.
+                            pass
+                        else:
+                            self.emit(GetPtr(getptr_reg, src, field_index), None)
+                            reg = self.reg(src.typ.fields[field_index])
+                            self.emit(Load(reg, getptr_reg), node)
+                # If it's not an field, it has to be a behaviour function.
+                # todo: emit a GetFunPtr if `parent` isn't ast.Call.
             case ast.Call():
                 callee = self.type_env.get(node.callee)
-                assert isinstance(callee.typ, types.Fun), f"Expected Fun, got {callee}"
-                fun = callee.typ
+                assert isinstance(callee, types.FunShape), f"Expected Fun, got {callee}"
+                fun = callee
                 ast.walk(node, self.generate)
                 args = [self.node_regs[x.id] for x in node.args]
-                if fun.is_named:
+                # We have to remove all parameters that are functions because they have been
+                # defunctionalized, i.e. moved from the call signature into the function body.
+                args = [
+                    x
+                    for x in args
+                    if not isinstance(x.typ, Fun) and not (isinstance(x.typ, Ptr) and isinstance(x.typ.typ, Fun))
+                ]
+                if fun.behaviour:
+                    # This is a behaviour function call, prepend the receiver to the args.
+                    assert isinstance(node.callee, ast.Member), f"Expected Member, got {node.callee}"
+                    receiver = self.node_regs[node.callee.target.id]
+                    args = [receiver, *args]
+                src = self.node_regs.get(node.callee.id)
+                if fun.builtin or not src or isinstance(src.typ, Ptr):
                     # Direct call by name.
                     reg = self.reg(self.typ(fun.result))
                     self.emit(Call(reg, self.fun_name(fun), args), node)
                 else:
-                    # Indirect call by register (either a `Fn` or a `Ptr<Fn>`).
+                    # Indirect call by register (either a `Fun` or a `Ptr<Fun>`).
                     src = self.node_regs[node.callee.id]
                     # Determine the result type of the call.
                     if isinstance(src.typ, Ptr):
@@ -718,19 +826,9 @@ class FunGen:
                     self.emit(Call(reg, src, args), node)
             case ast.Assign():
                 ast.walk(node, self.generate)
+                reg = self.node_regs[node.value.id]
                 src = node.target
-                match src:
-                    case ast.Name():
-                        if not self.scope.find(src.name):
-                            self.scope.declare(src.name, self.node_regs[node.value.id])
-                        else:
-                            self.scope.update(src.name, self.node_regs[node.value.id])
-                    case ast.Member():
-                        reg = self.node_regs[src.id]
-                        value_reg = self.node_regs[node.value.id]
-                        self.emit(Store(reg, value_reg), node)
-                    case _:
-                        raise AssertionError(f"Unsupported target type: {src}")
+                self.scope.bind(src.name, reg)
                 self.node_regs[node.id] = NoneReg
             case ast.BinaryExpr():
                 ast.walk(node, self.generate)
@@ -738,22 +836,41 @@ class FunGen:
                 rhs_reg = self.node_regs[node.rhs.id]
                 match node.op:
                     case ast.BinaryOp.add:
-                        reg = self.reg(I64)
-                        self.emit(IAddO(reg, lhs_reg, rhs_reg), node)
+                        if isinstance(lhs_reg.typ, List):
+                            reg = self.reg(List(lhs_reg.typ.typ))
+                            self.emit(ListConcat(reg, lhs_reg, rhs_reg), node)
+                        else:
+                            reg = self.reg(I64)
+                            self.emit(IAddO(reg, lhs_reg, rhs_reg), node)
                     case ast.BinaryOp.sub:
                         reg = self.reg(I64)
                         self.emit(ISubO(reg, lhs_reg, rhs_reg), node)
+                    case ast.BinaryOp.mul:
+                        reg = self.reg(I64)
+                        self.emit(IMulO(reg, lhs_reg, rhs_reg), node)
+                    case ast.BinaryOp.div:
+                        reg = self.reg(I64)
+                        self.emit(IDivO(reg, lhs_reg, rhs_reg), node)
                     case ast.BinaryOp.eq | ast.BinaryOp.ne:
                         match lhs_reg.typ:
                             case Int():
                                 op = ICmpOp.eq if node.op == ast.BinaryOp.eq else ICmpOp.ne
-                                reg = self.reg(I1)
+                                reg = self.reg(Bool())
                                 self.emit(ICmp(reg, op, lhs_reg, rhs_reg), node)
                             case _:
                                 raise AssertionError(f"Unsupported type for equality comparison: {lhs_reg.typ}")
                     case _:
                         raise AssertionError(f"Unsupported binary op: {node.op}")
-            case ast.ShapeRef() | ast.FunParam():
+            case (
+                ast.ShapeRef()
+                | ast.Param()
+                | ast.UnitShape()
+                | ast.Behaviour()
+                | ast.FunShape()
+                | ast.ProductShape()
+                | ast.ProductShapeLit()  # ProductShapeLit is always wrapped in a CompoundShapeLit.
+                | ast.CompoundShape()
+            ):
                 pass
             case _:
                 raise AssertionError(f"Unsupported node: {node.__class__}")

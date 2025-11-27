@@ -1,5 +1,7 @@
 """Run tests found in a markdown file."""
 
+from __future__ import annotations
+
 import contextlib
 import re
 import shutil
@@ -10,7 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from time import time
 
-from . import compiler, error, token
+from . import compiler, error, span, token
 
 
 @dataclass
@@ -25,13 +27,11 @@ class Case:
     def name(self) -> str:
         return " > ".join(self.headings) + f" ({self.test_num})"
 
-
-def run_test(case: Case, print_code: str) -> list:
-    def handle_errors(errors: list[error.Error]) -> list[error.Error]:
+    def handle_expected_errors(self, errors: list[error.Error]) -> list[error.Error]:
         if errors:
             for err in list(errors):
                 line_number = err.span.start_line_col()[0]
-                line = case.code.split("\n")[line_number - 1]
+                line = self.code.split("\n")[line_number - 1]
                 try:
                     index = line.index("-- ERROR: ")
                 except ValueError:
@@ -39,11 +39,19 @@ def run_test(case: Case, print_code: str) -> list:
                 if index >= 0:
                     expected_error_message = line[index + len("-- ERROR: ") :].strip()
                     if expected_error_message in str(err).split("\n")[0]:
-                        # This error is expected.
-                        errors = [x for x in errors if x != err]
-                        continue
+                        # This error is expected and we ignore all other errors.
+                        return []
+        elif "-- ERROR: " in str(self.code):
+            index = self.code.index("ERROR: ")
+            return [
+                error.SimpleError(
+                    span.Span("test.kl", self.code, index, index + 6), "Expected a compilation error, got none", ""
+                )
+            ]
         return errors
 
+
+def run_test(case: Case, print_code: str) -> list:
     tmp_dir = Path(tempfile.gettempdir(), re.sub(r"[^a-zA-Z0-9]", "_", case.name()))
     tmp_dir.mkdir(parents=True, exist_ok=True)
     tmp_file = tmp_dir / "test"
@@ -54,27 +62,27 @@ def run_test(case: Case, print_code: str) -> list:
                     if print_code == "tokens":
                         print()
                         print(step)
-                        return handle_errors(step.errors)
+                        return step.errors
                     if step.errors:
-                        return handle_errors(step.errors)
+                        return step.errors
                     if step.duration > 0.1:
                         print(f" [token:{step.duration * 1000:.0f}]", end="", flush=True)
                 case compiler.ParseStep():
                     if print_code == "ast":
                         print()
                         print(step)
-                        return handle_errors(step.errors)
+                        return step.errors
                     if step.errors:
-                        return handle_errors(step.errors)
+                        return step.errors
                     if step.duration > 0.1:
                         print(f" [parse:{step.duration * 1000:.0f}]", end="", flush=True)
                 case compiler.TypecheckStep():
                     if print_code == "types":
                         print()
                         print(step)
-                        return handle_errors(step.errors)
+                        return step.errors
                     if step.errors:
-                        return handle_errors(step.errors)
+                        return step.errors
                     if step.duration > 0.1:
                         print(f" [typecheck:{step.duration * 1000:.0f}]", end="", flush=True)
                 case compiler.AbortStep():
@@ -95,21 +103,43 @@ def run_test(case: Case, print_code: str) -> list:
                         print(f" [code:{step.duration * 1000:.0f}]", end="", flush=True)
                 case compiler.CompileStep():
                     if step.returncode != 0:
-                        return [f"Compilation (Go) failed with code {step.returncode}\n{step.stdout}\n{step.stderr}"]
+                        return [
+                            error.SimpleError(
+                                span.Span("test.kl", case.code, 0, 0),
+                                f"Compilation (Go) failed with code {step.returncode}\n{step.stdout}\n{step.stderr}",
+                                "",
+                            )
+                        ]
                     if step.duration > 0.1:
                         print(f" [go:{step.duration * 1000:.0f}]", end="", flush=True)
                 case compiler.RunStep():
                     if step.returncode != 0:
-                        return [f"Test exited with code {step.returncode}\n{step.stdout}\n{step.stderr}"]
+                        return [
+                            error.SimpleError(
+                                span.Span("test.kl", case.code, 0, 0),
+                                f"Test exited with code {step.returncode}\n{step.stdout}\n{step.stderr}",
+                                "",
+                            )
+                        ]
                     stdout = step.stdout.strip().replace("\0", "")
                     if stdout != case.expected_stdout:
-                        return [f"Expected:\n\n`{case.expected_stdout}`\n\ngot:\n\n`{stdout}`"]
+                        return [
+                            error.SimpleError(
+                                span.Span("test.kl", case.code, 0, 0),
+                                f"Expected:\n\n`{case.expected_stdout}`\n\ngot:\n\n`{stdout}`",
+                                "",
+                            )
+                        ]
                     if step.duration > 0.1:
                         print(f" [run:{step.duration * 1000:.0f}]", end="", flush=True)
                 case _:
                     raise ValueError(f"Unknown step: {step}")
     except (AssertionError, AttributeError):
-        return ["Test failed with exception:", traceback.format_exc()]
+        return [
+            error.SimpleError(
+                span.Span("test.kl", case.code, 0, 0), "Test failed with exception: " + traceback.format_exc(), ""
+            )
+        ]
     finally:
         with contextlib.suppress(FileNotFoundError):
             shutil.rmtree(tmp_dir)
@@ -224,7 +254,8 @@ def main(args: list[str]) -> int:
     start = time()
     for test in tests:
         print(test.name(), f"at {file}:{test.line}", end="")
-        if errors := run_test(test, print_code):
+        errors = test.handle_expected_errors(run_test(test, print_code))
+        if errors:
             failed += 1
             print(" \033[0;31mFAIL\033[0m")
             for err in errors:
